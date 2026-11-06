@@ -98,7 +98,7 @@ def test_follow_enters_like_a(conn, ccfg):
     run_pair(conn, ccfg, llm)
     assert len(trades(conn, "A1")) == len(trades(conn, "B1")) == 1
     m = conn.execute("SELECT * FROM council_meetings").fetchone()
-    assert m["error"] is None and m["prompt_version"] == "v1"
+    assert m["error"] is None and m["prompt_version"] == "v2"
     assert m["input_tokens"] == 4000 and m["output_tokens"] == 2000
     # 비용: opus 3회 (1000*4 + 500*20)/1e6 + sonnet 1회 (1000*2 + 500*10)/1e6, 달러→원 1000
     assert m["cost_krw"] == pytest.approx((3 * 0.014 + 0.007) * 1000)

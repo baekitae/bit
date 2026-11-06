@@ -54,7 +54,7 @@ risk:
 strategy:
   name: ma_cross              # 1단계 임시 전략
   version: v1
-  window_bars: 500            # 전략에 넘기는 최근 봉 수 (백테스트·실시간 동일하게 고정)
+  window_bars: 600            # 전략에 넘기는 최근 봉 수 (4시간봉 600개 = 100일, 위원회 90일 수익률 계산 가능)
   params:
     fast: 20
     slow: 60

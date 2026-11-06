@@ -45,7 +45,7 @@ def build_context(track, signal, bar_ts: int, cfg: dict[str, Any]) -> dict[str, 
     realized = rets.iloc[-vol_n:].std() * math.sqrt(bars_per_year) if len(rets) > vol_n else float("nan")
     a = atr(w["high"], w["low"], close, 14).iloc[-1]
     hi = _bars(30 * 24, unit)
-    recent = w.iloc[-12:]
+    recent = w.iloc[-13:]                    # 13봉 → 변화율 12개
     regime = classify(w, cfg["regime"], unit)[-1]
 
     acc = track.account

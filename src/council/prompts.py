@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"   # v2: 최근 12봉 변화율 12개, 90일 수익률 제공 (window 600)
 
 COMMON = """당신은 업비트 KRW-BTC 현물 모의매매 시스템의 "AI 위원회" 위원입니다.
 
