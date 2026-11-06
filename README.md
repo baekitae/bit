@@ -3,7 +3,7 @@
 업비트 KRW-BTC에서 세 가지 방식(A: 규칙 전략, B: 규칙 + AI 필터, C: 규칙 + AI 필터 + 전략 진화)을
 같은 조건에서 모의매매로 비교하는 프로젝트입니다. 설계는 [DESIGN.md](DESIGN.md)를 기준으로 합니다.
 
-**현재: 3단계** (실시간 모의매매: A1~A5 규칙 트랙 + B1~B4 AI 위원회 트랙, 대시보드). 실제 주문 코드는 없습니다.
+**현재: 4단계** (실시간 모의매매: A1~A5 규칙, B1~B4 Claude 위원회, G1~G4 Gemini 위원회, C 진화 트랙, 대시보드). 실제 주문 코드는 없습니다.
 
 ## 설치 (Windows)
 
@@ -18,7 +18,10 @@ copy .env.example .env
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...          # G 트랙(Gemini 비교)용. https://aistudio.google.com 에서 발급
 ```
+
+Gemini 모델 이름은 `config.yaml` 의 `councils.gemini.default.model` 에 있습니다. AI Studio 에서 쓸 수 있는 이름인지 확인하세요.
 
 키는 https://console.anthropic.com → Settings → API Keys 에서 만듭니다 (결제 수단 등록·크레딧 충전 필요).
 
@@ -27,6 +30,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```bat
 python run.py fetch      :: 업비트 4시간봉 4년치 수집 (다시 실행하면 새 봉만 추가)
 python run.py council-test   :: AI 위원회 1회 시험 (실제 API 호출, 매매 없음, 비용 수백 원)
+python run.py council-test --track G1   :: Gemini 위원회 1회 시험
+python run.py evolution      :: C 트랙 버전 이력 (되돌리기: --rollback v1)
 python run.py live           :: 실시간 모의매매 시작 (켜 두기). Ctrl+C 로 종료, 다시 켜면 이어서 진행
 streamlit run src/report/dashboard.py   :: 대시보드 (브라우저에서 http://localhost:8501)
 python run.py backtest   :: 2단계: 후보 전략 4개 비교 → reports/stage2_240m.md

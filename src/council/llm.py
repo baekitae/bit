@@ -98,7 +98,71 @@ class ClaudeClient:
         )
 
 
+class GeminiClient:
+    """Google Gemini (비교 트랙용). REST API 를 직접 호출한다. 키는 환경변수 GEMINI_API_KEY.
+
+    - 응답을 JSON 으로 받도록 responseMimeType 을 지정하고, 스키마는 프롬프트에 함께 적는다.
+      (형식은 코드가 다시 검증하며, 틀리면 위원회가 skip 한다)
+    - 무료 등급은 하루·분당 호출 한도가 있다. 한도 초과(429)는 오류로 처리되어 그 회의는 skip 된다.
+    """
+    provider = "gemini"
+    URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    def __init__(self, session: Any = None, api_key: str | None = None):
+        import os
+
+        import requests
+        self.session = session or requests.Session()
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+
+    def complete(self, *, model: str, system: str, user: str, schema: dict[str, Any],
+                 effort: str, timeout: float, max_tokens: int) -> LLMResponse:
+        if not self.api_key:
+            raise LLMError("GEMINI_API_KEY 가 없습니다 (.env 확인)")
+        if not model:
+            raise LLMError("Gemini 모델 이름이 config 에 없습니다")
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user + "\n\n반드시 아래 JSON 스키마에 맞는 JSON 하나만 출력하세요:\n"
+                                                     + json.dumps(schema, ensure_ascii=False)}]}],
+            "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": max_tokens},
+        }
+        t0 = time.monotonic()
+        try:
+            resp = self.session.post(self.URL.format(model=model), json=body, timeout=timeout,
+                                     headers={"x-goog-api-key": self.api_key})
+        except Exception as e:
+            raise LLMError(f"Gemini 연결 오류: {type(e).__name__}: {e}") from e
+        if resp.status_code == 429:
+            raise LLMError("Gemini 호출 한도 초과(429) - 무료 한도일 수 있음")
+        if resp.status_code >= 400:
+            raise LLMError(f"Gemini API 오류 {resp.status_code}: {resp.text[:200]}")
+        payload = resp.json()
+        cands = payload.get("candidates") or []
+        if not cands:
+            fb = payload.get("promptFeedback", {})
+            raise LLMError(f"Gemini 응답 없음 (차단 사유: {fb.get('blockReason')})")
+        finish = cands[0].get("finishReason")
+        if finish not in (None, "STOP"):
+            raise LLMError(f"Gemini 응답이 정상 종료되지 않음: {finish}")
+        text = "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []) if not p.get("thought"))
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise LLMError(f"Gemini JSON 파싱 실패: {text[:200]!r}") from e
+        missing = [k for k in schema.get("required", []) if k not in data]
+        if missing:
+            raise LLMError(f"Gemini 응답에 필수 항목 없음: {missing}")
+        u = payload.get("usageMetadata", {})
+        out_tokens = int(u.get("candidatesTokenCount", 0)) + int(u.get("thoughtsTokenCount", 0))
+        return LLMResponse(data=data, text=text, provider=self.provider, model=payload.get("modelVersion") or model,
+                           input_tokens=int(u.get("promptTokenCount", 0)), output_tokens=out_tokens,
+                           latency_sec=time.monotonic() - t0)
+
+
 def make_client(provider: str, **kwargs: Any) -> LLMClient:
     if provider == "claude":
         return ClaudeClient(**kwargs)
+    if provider == "gemini":
+        return GeminiClient(**kwargs)
     raise LLMError(f"아직 지원하지 않는 AI 제공자: {provider} (src/council/llm.py 에 어댑터를 추가하세요)")

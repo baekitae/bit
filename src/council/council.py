@@ -83,8 +83,12 @@ def validate_decision(raw: dict[str, Any], rule_stop: float | None, price: float
 
 class Council:
     def __init__(self, cfg: dict[str, Any], client_factory: Callable[[str], LLMClient] | None = None,
-                 now: Callable[[], float] = time.time):
-        c = cfg["council"]
+                 now: Callable[[], float] = time.time, settings: dict[str, Any] | None = None,
+                 name: str = "default"):
+        """settings: 기본 council 설정 대신 쓸 설정 (예: Gemini 비교 위원회, config councils.gemini).
+        name: 위원회 이름. 회의 기록에 남고, 하루 소집 한도를 위원회별로 센다."""
+        c = settings or cfg["council"]
+        self.name = name
         self.cfg = c
         self.usd_krw = float(c.get("usd_krw", 1400))
         self.pricing = c.get("pricing", {})
@@ -108,6 +112,8 @@ class Council:
 
     def cost_krw(self, r: LLMResponse) -> float:
         p = self.pricing.get(r.model) or self.pricing.get(r.model.split("@")[0])
+        if p is None and self.cfg.get("free"):
+            return 0.0
         if not p:
             return float("nan")
         usd = r.input_tokens / 1e6 * p[0] + r.output_tokens / 1e6 * p[1]
@@ -137,9 +143,9 @@ class Council:
         day_start = int((self.now() - self.day_boundary_sec) // 86400 * 86400 + self.day_boundary_sec)
         start = datetime.fromtimestamp(day_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         return conn.execute(
-            "SELECT COUNT(*) FROM council_meetings WHERE run_id=? AND created_at >= ? AND error IS NOT 'daily_limit'",
-            (run_id, start),
-        ).fetchone()[0]
+            """SELECT COUNT(*) FROM council_meetings WHERE run_id=? AND created_at >= ?
+               AND error IS NOT 'daily_limit' AND COALESCE(council, 'default') = ?""",
+            (run_id, start, self.name)).fetchone()[0]
 
     # ---- 회의 ----
     def decide(self, conn: sqlite3.Connection, run_id: str, track: str, signal_id: int, bar_ts: int,
@@ -186,11 +192,11 @@ class Council:
                                        error="하루 최대 소집 횟수 초과" if error == "daily_limit" else error)
         settings = {r: self.role_setting(r) for r in (*MEMBERS, "chair")}
         cur = conn.execute(
-            """INSERT INTO council_meetings (created_at, run_id, track, signal_id, bar_ts, input, transcript,
+            """INSERT INTO council_meetings (created_at, council, run_id, track, signal_id, bar_ts, input, transcript,
                    decision, providers, used_fallback, prompt_version, gen_settings, input_tokens,
                    output_tokens, cost_krw, latency_sec, error)
-               VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (run_id, track, signal_id, bar_ts, json.dumps(context, ensure_ascii=False),
+               VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (self.name, run_id, track, signal_id, bar_ts, json.dumps(context, ensure_ascii=False),
              json.dumps(transcript, ensure_ascii=False),
              json.dumps({"raw": chair_raw, "applied": {
                  "decision": decision.decision, "size_multiplier": decision.size_multiplier,

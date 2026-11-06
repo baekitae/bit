@@ -138,8 +138,12 @@ def cmd_infinite(cfg, conn, args) -> None:
 
 
 def make_council(cfg):
+    """{위원회 이름: Council}. default = Claude (config council), 그 외는 config councils.<이름>."""
     from src.council.council import Council
-    return Council(cfg)
+    out = {"default": Council(cfg)}
+    for name, settings in (cfg.get("councils") or {}).items():
+        out[name] = Council(cfg, settings=settings, name=name)
+    return out
 
 
 def cmd_live(cfg, conn, args) -> None:
@@ -149,9 +153,12 @@ def cmd_live(cfg, conn, args) -> None:
     from src.live import LiveRunner
     from src.tracks.registry import track_defs
 
-    needs_ai = any(d["type"] == "council" for d in track_defs(cfg).values())
+    defs = track_defs(cfg).values()
+    needs_ai = any(d["type"] in ("council", "evolving") for d in defs)
     if needs_ai and not os.environ.get("ANTHROPIC_API_KEY"):
-        print("주의: ANTHROPIC_API_KEY 가 없습니다 (.env 확인). B 트랙 위원회는 오류로 처리되어 모두 skip 됩니다.")
+        print("주의: ANTHROPIC_API_KEY 가 없습니다 (.env 확인). B·C 트랙 위원회는 오류로 처리되어 모두 skip 됩니다.")
+    if any(d.get("council") == "gemini" for d in defs) and not os.environ.get("GEMINI_API_KEY"):
+        print("주의: GEMINI_API_KEY 가 없습니다 (.env 확인). G 트랙(Gemini 비교) 위원회는 모두 skip 됩니다.")
     client = UpbitClient(interval_sec=float(cfg["data"]["request_interval_sec"]))
     runner = LiveRunner(conn, cfg, client, council=make_council(cfg) if needs_ai else None, run_id=args.run_id)
     if args.once:
@@ -173,11 +180,13 @@ def cmd_council_test(cfg, conn, args) -> None:
 
     name = args.track
     d = track_defs(cfg)[name]
-    if d["type"] != "council":
+    if d["type"] not in ("council", "evolving"):
         print(f"{name} 은 위원회 트랙이 아닙니다")
         return
     run_id = "council-test"
     track = build_tracks(conn, cfg, run_id, [name], council=make_council(cfg))[0]
+    if d.get("council") == "gemini":
+        print("Gemini 위원회로 시험합니다 (무료 한도 중 4회 사용)")
     df = load_candles(conn, cfg["market"], 240)
     if track.unit == 1440:
         df = resample(df, 240, 1440, int(cfg.get("day_boundary_utc_hour", 0)) * 3600)
@@ -208,6 +217,31 @@ def cmd_council_test(cfg, conn, args) -> None:
         print(f"  - {n}")
     print(f"토큰: 입력 {row['input_tokens']:,} / 출력 {row['output_tokens']:,}, 비용 약 {row['cost_krw']:,.0f}원, "
           f"소요 {row['latency_sec']:.0f}초")
+
+
+def cmd_evolution(cfg, conn, args) -> None:
+    """C 트랙 버전 이력 보기 / 되돌리기."""
+    import json
+    import time
+
+    from src.evolution.manager import Evolution
+    from src.tracks.registry import track_defs
+
+    name = args.track
+    d = track_defs(cfg)[name]
+    rows = conn.execute("SELECT * FROM strategy_versions WHERE run_id=? AND track=? ORDER BY id",
+                        (args.run_id, name)).fetchall()
+    if args.rollback:
+        ev = Evolution(conn, cfg, args.run_id, name, d["strategy"], d["params"], make_council(cfg)["default"])
+        ev.rollback(args.rollback, int(time.time()))
+        print(f"{args.rollback} 파라미터로 되돌렸습니다. 실행 중인 live 는 다시 시작해야 반영됩니다.")
+        return
+    st = conn.execute("SELECT * FROM evolution_state WHERE run_id=? AND track=?", (args.run_id, name)).fetchone()
+    if st:
+        print(f"{name}: 단계 {st['phase']}, 기간 시작 {kst_str(st['cycle_start_ts'])}, 누적 수정안 시도 {st['attempts']}회")
+    for r in rows:
+        print(f"  {r['version']:<4} {r['status']:<9} {r['created_at']}  {r['change_summary'] or ''}")
+        print(f"       {json.loads(r['params'])}")
 
 
 def cmd_summary(cfg, conn, args) -> None:
@@ -250,7 +284,11 @@ def main(argv=None) -> int:
     lp.add_argument("--run-id", default="live")
     lp.add_argument("--once", action="store_true", help="한 회차만 실행하고 종료")
     cp = sub.add_parser("council-test", help="실제 AI 로 위원회 1회 시험 (매매 없음)")
-    cp.add_argument("--track", default="B1")
+    cp.add_argument("--track", default="B1", help="B1 (Claude) 또는 G1 (Gemini) 등")
+    ep = sub.add_parser("evolution", help="C 트랙 버전 이력 / 되돌리기")
+    ep.add_argument("--track", default="C")
+    ep.add_argument("--run-id", default="live")
+    ep.add_argument("--rollback", default=None, help="이 버전의 파라미터로 되돌림 (예: v1)")
     ip = sub.add_parser("infinite", help="무한매수법 시뮬레이션 (일봉)")
     ip.add_argument("--years", type=float, nargs="*", default=[4, 10])
     sp = sub.add_parser("summary", help="결과 요약")
@@ -262,7 +300,7 @@ def main(argv=None) -> int:
     conn = connect(db_path(cfg))
     try:
         {"fetch": cmd_fetch, "backtest": cmd_backtest, "infinite": cmd_infinite, "live": cmd_live,
-         "council-test": cmd_council_test, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
+         "council-test": cmd_council_test, "evolution": cmd_evolution, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
     finally:
         conn.close()
     return 0

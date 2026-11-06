@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS equity (
 CREATE TABLE IF NOT EXISTS council_meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),   -- UTC
+    council TEXT,                     -- 위원회 이름 (default=Claude, gemini=비교 위원회)
     run_id TEXT NOT NULL,
     track TEXT NOT NULL,
     signal_id INTEGER,
@@ -179,16 +180,29 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
 -- 4단계: C 트랙 전략 버전 (DESIGN.md 9장)
 CREATE TABLE IF NOT EXISTS strategy_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT,
     track TEXT NOT NULL,
     version TEXT NOT NULL,
     parent_version TEXT,
     strategy TEXT NOT NULL,
     params TEXT NOT NULL,             -- JSON
-    status TEXT NOT NULL,             -- active / shadow / retired / rejected
+    status TEXT NOT NULL,             -- active / shadow / retired / rejected / no_change
     change_summary TEXT,
     change_reason TEXT,
     validation TEXT,                  -- 검증 결과 (JSON)
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 4단계: C 트랙 진화 루프 상태 (DESIGN.md 9장)
+CREATE TABLE IF NOT EXISTS evolution_state (
+    run_id TEXT NOT NULL,
+    track TEXT NOT NULL,
+    phase TEXT NOT NULL,              -- fixed / shadow
+    cycle_start_ts INTEGER NOT NULL,  -- 현재 고정 기간 시작
+    shadow_version TEXT,
+    shadow_start_ts INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,   -- 누적 수정안 시도 횟수 (반복 검증 과최적화 경고용)
+    PRIMARY KEY (run_id, track)
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_run ON signals (run_id, track, bar_ts);
@@ -222,7 +236,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.executescript(SCHEMA)
     adds = {
         "positions": [("initial_stop", "REAL"), ("peak_price", "REAL"), ("trail_pct", "REAL")],
-        "council_meetings": [("created_at", "TEXT")],
+        "council_meetings": [("created_at", "TEXT"), ("council", "TEXT")],
+        "strategy_versions": [("run_id", "TEXT")],
         "signal_outcomes": [("a_track", "TEXT"), ("b_track", "TEXT"), ("b_trade_id", "INTEGER"),
                             ("b_pnl_pct", "REAL")],
     }

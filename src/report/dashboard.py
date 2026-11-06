@@ -34,6 +34,18 @@ STRATEGY_LABELS = {
 DECISION_LABELS = {"follow": "따름", "reduce": "비중 축소", "skip": "건너뜀", "error": "오류(건너뜀)"}
 
 
+GROUPS = ["A · 규칙", "B · Claude 위원회", "G · Gemini 위원회", "C · 진화"]
+
+
+def group_of(name: str, defs: dict) -> str:
+    d = defs.get(name.split("_")[0], {})
+    if d.get("type") == "evolving":
+        return GROUPS[3]
+    if d.get("type") == "council":
+        return GROUPS[2] if d.get("council") == "gemini" else GROUPS[1]
+    return GROUPS[0]
+
+
 def kst(ts) -> str:
     return datetime.fromtimestamp(int(ts), tz=KST).strftime("%m-%d %H:%M") if pd.notna(ts) else "-"
 
@@ -90,7 +102,7 @@ def main() -> None:
         pos = positions[positions["track"] == name]
         rows.append({
             "트랙": name,
-            "종류": "AI 위원회" if d.get("type") == "council" else "규칙",
+            "종류": group_of(name, defs),
             "전략": STRATEGY_LABELS.get(t["strategy"], t["strategy"]),
             "봉": "일봉" if int(d.get("timeframe", 240)) == 1440 else "4시간봉",
             "자산(원)": round(t["last_equity"] or t["cash"]),
@@ -120,12 +132,18 @@ def main() -> None:
         eq["시각"] = pd.to_datetime(eq["bar_ts"], unit="s", utc=True).dt.tz_convert("Asia/Seoul")
         eq["strategy"] = eq["track"].map(meta["strategy"])
         eq["전략"] = eq["strategy"].map(STRATEGY_LABELS)
-        eq["종류"] = eq["track"].map(lambda n: "B · AI 위원회" if defs.get(n, {}).get("type") == "council" else "A · 규칙")
-        domain = [STRATEGY_LABELS[k] for k in STRATEGY_COLORS]
-        scale = alt.Scale(domain=domain, range=list(STRATEGY_COLORS.values()))
-        cols = st.columns(2)
-        for col, kind in zip(cols, ["A · 규칙", "B · AI 위원회"]):
+        eq["종류"] = eq["track"].map(lambda n: group_of(n, defs))
+        # C 묶음은 활성/섀도 버전이 같은 전략이므로 트랙 이름으로 구분 (A 의 같은 전략 색과 함께)
+        eq["계열"] = np.where(eq["종류"] == GROUPS[3], eq["track"], eq["전략"])
+        color_of = {STRATEGY_LABELS[k]: v for k, v in STRATEGY_COLORS.items()}
+        c_tracks = sorted(eq.loc[eq["종류"] == GROUPS[3], "track"].unique())
+        for name, col in zip(c_tracks, ["#6250d6", "#008300", "#e34948"]):   # 범주형 7·6·8번 (C 버전용)
+            color_of[name] = col
+        grid = [st.columns(2), st.columns(2)]
+        for col, kind in zip([grid[0][0], grid[0][1], grid[1][0], grid[1][1]], GROUPS):
             sub = eq[eq["종류"] == kind]
+            present = [k for k in color_of if k in set(sub["계열"])]   # 이 차트에 있는 계열만, 색은 고정
+            scale = alt.Scale(domain=present, range=[color_of[k] for k in present])
             with col:
                 st.subheader(kind)
                 if sub.empty:
@@ -135,7 +153,7 @@ def main() -> None:
                 base = alt.Chart(sub).encode(
                     x=alt.X("시각:T", title=None, axis=alt.Axis(grid=False, format="%m-%d")),
                     y=alt.Y("수익률:Q", title=None, axis=alt.Axis(format="%", gridOpacity=0.3)),
-                    color=alt.Color("전략:N", scale=scale, legend=alt.Legend(orient="top", title=None, columns=3)),
+                    color=alt.Color("계열:N", scale=scale, legend=alt.Legend(orient="top", title=None, columns=3)),
                 )
                 lines = base.mark_line(strokeWidth=2)
                 points = base.mark_point(size=60, filled=True).encode(
@@ -149,30 +167,65 @@ def main() -> None:
                 st.altair_chart((lines + points + rule).properties(height=280), width="stretch")
 
     # ---- 3. AI 필터 효과 (신호 단위 짝비교, DESIGN.md 1-1) ----
-    st.header("AI 필터 효과 (B vs A, 신호 단위)")
+    st.header("AI 필터 효과 (신호 단위 짝비교)")
     so = q(conn, "SELECT * FROM signal_outcomes WHERE run_id=?", (run_id,))
     min_sig = int(cfg["comparison"]["min_signals"])
+    start = q(conn, "SELECT MIN(created_at) AS t FROM run_log WHERE run_id=? AND event='comparison_start'", (run_id,))["t"].iloc[0]
+    if start:
+        days = (datetime.now(timezone.utc) - datetime.fromisoformat(start).replace(tzinfo=timezone.utc)).days
+        months = int(cfg["comparison"]["months"])
+        st.caption(f"6개월 비교 시작: {start} UTC (C 트랙 시작일) · {days}일 경과 / {months * 30}일")
     if so.empty:
         st.caption("아직 위원회가 열린 신호가 없습니다.")
     else:
-        done = so[so["a_pnl_pct"].notna()]
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("위원회 소집 신호", f"{len(so)}건", help=f"판정 기준: {min_sig}건 이상")
-        c2.metric("A 결과 확정", f"{len(done)}건")
-        follow = done[done["b_decision"] == "follow"]["a_pnl_pct"]
-        skip = done[done["b_decision"].isin(["skip", "error"])]["a_pnl_pct"]
-        c3.metric("따른 신호의 A 평균 수익", f"{follow.mean():+.2%}" if len(follow) else "-")
-        c4.metric("건너뛴 신호의 A 평균 수익", f"{skip.mean():+.2%}" if len(skip) else "-",
-                  help="음수일수록 AI가 손실 신호를 잘 걸렀다는 뜻")
-        if len(so) < min_sig:
-            st.caption(f"표본 {len(so)}건 / 기준 {min_sig}건: 아직 결론을 내기에는 이릅니다.")
-        tab = (so.assign(결정=so["b_decision"].map(DECISION_LABELS).fillna(so["b_decision"]))
-                 .groupby("결정").agg(신호=("id", "count"), A_결과확정=("a_pnl_pct", "count"),
-                                     A_평균수익=("a_pnl_pct", "mean"), B_평균수익=("b_pnl_pct", "mean"))
-                 .reset_index())
-        st.dataframe(tab, hide_index=True, column_config={
-            "A_평균수익": st.column_config.NumberColumn("A 평균 수익(거래당)", format="percent"),
-            "B_평균수익": st.column_config.NumberColumn("B 평균 수익(거래당)", format="percent")})
+        so["위원회"] = so["b_track"].map(lambda n: "Gemini" if str(n).startswith("G") else "Claude")
+        cols = st.columns(2)
+        for col, who in zip(cols, ["Claude", "Gemini"]):
+            sub = so[so["위원회"] == who]
+            with col:
+                st.subheader(f"{who} ({'B' if who == 'Claude' else 'G'} 트랙)")
+                if sub.empty:
+                    st.caption("기록 없음")
+                    continue
+                done = sub[sub["a_pnl_pct"].notna()]
+                follow = done[done["b_decision"] == "follow"]["a_pnl_pct"]
+                skip = done[done["b_decision"].isin(["skip", "error"])]["a_pnl_pct"]
+                m1, m2, m3 = st.columns(3)
+                m1.metric("소집 신호", f"{len(sub)}건", help=f"판정 기준: {min_sig}건 이상")
+                m2.metric("따른 신호 A 평균", f"{follow.mean():+.2%}" if len(follow) else "-")
+                m3.metric("건너뛴 신호 A 평균", f"{skip.mean():+.2%}" if len(skip) else "-",
+                          help="음수일수록 AI 가 손실 신호를 잘 걸렀다는 뜻")
+                if len(sub) < min_sig:
+                    st.caption(f"표본 {len(sub)}건 / 기준 {min_sig}건: 아직 결론을 내기에는 이릅니다.")
+                tab = (sub.assign(결정=sub["b_decision"].map(DECISION_LABELS).fillna(sub["b_decision"]))
+                          .groupby("결정").agg(신호=("id", "count"), A_결과확정=("a_pnl_pct", "count"),
+                                              A_평균수익=("a_pnl_pct", "mean"), 위원회트랙_평균수익=("b_pnl_pct", "mean"))
+                          .reset_index())
+                st.dataframe(tab, hide_index=True, column_config={
+                    "A_평균수익": st.column_config.NumberColumn("A 평균 수익(거래당)", format="percent"),
+                    "위원회트랙_평균수익": st.column_config.NumberColumn("위원회 트랙 평균 수익", format="percent")})
+        both = so.pivot_table(index="a_signal_id", columns="위원회", values="b_decision", aggfunc="first").dropna()
+        if len(both) and {"Claude", "Gemini"} <= set(both.columns):
+            agree = (both["Claude"] == both["Gemini"]).mean()
+            st.caption(f"같은 신호를 두 위원회가 모두 판단한 {len(both)}건 중 결정 일치율 {agree:.0%}")
+
+    # ---- C 트랙 진화 ----
+    st.header("C 트랙 전략 진화")
+    vers = q(conn, "SELECT * FROM strategy_versions WHERE run_id=? ORDER BY id", (run_id,))
+    est = q(conn, "SELECT * FROM evolution_state WHERE run_id=?", (run_id,))
+    if est.empty:
+        st.caption("C 트랙이 아직 시작되지 않았습니다.")
+    else:
+        e = est.iloc[0]
+        phase = "고정 운영" if e["phase"] == "fixed" else f"섀도 운영 ({e['shadow_version']})"
+        st.markdown(f"**{e['track']}**: {phase} · 현재 기간 시작 {kst(e['cycle_start_ts'])} · "
+                    f"누적 수정안 시도 **{e['attempts']}회** (많을수록 우연히 통과할 가능성이 커짐)")
+        if not vers.empty:
+            v = vers.copy()
+            v["파라미터"] = v["params"]
+            v["검증"] = v["validation"].map(lambda x: (json.loads(x) or {}).get("reason", "") if x else "")
+            st.dataframe(v[["version", "status", "created_at", "change_summary", "파라미터", "검증"]],
+                         hide_index=True, width="stretch")
 
     # ---- 4. 위원회 회의록 ----
     st.header("위원회 회의록")

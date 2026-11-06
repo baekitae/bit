@@ -16,7 +16,7 @@ costs:
 tracks:
   initial_cash: 1000000       # 트랙별 가상 시작 자금 (원)
   # 실시간 모의매매에서 돌릴 트랙 (A 트랙을 먼저 처리한다)
-  enabled: [A1, A2, A3, A4, A5, B1, B2, B3, B4]
+  enabled: [A1, A2, A3, A4, A5, B1, B2, B3, B4, C, G1, G2, G3, G4]
   defs:
     # A: 규칙 전략 그대로 (파라미터는 2단계 4시간봉 리포트에서 고른 값)
     A1: {type: rule, strategy: donchian, timeframe: 240,
@@ -35,6 +35,13 @@ tracks:
     B2: {type: council, mirror: A2}
     B3: {type: council, mirror: A3}
     B4: {type: council, mirror: A4}
+    # G: B 와 똑같되 AI 만 Gemini (모델 비교용, DESIGN.md 8-6). 하루 한도는 councils.gemini 에서
+    G1: {type: council, mirror: A1, council: gemini}
+    G2: {type: council, mirror: A2, council: gemini}
+    G3: {type: council, mirror: A3, council: gemini}
+    G4: {type: council, mirror: A4, council: gemini}
+    # C: A1 과 같은 전략 + AI 위원회 필터 + 전략 진화 (DESIGN.md 9장)
+    C: {type: evolving, base: A1}
 
 day_boundary_utc_hour: 0      # 하루 기준 = UTC 00:00 = KST 09:00
 
@@ -83,7 +90,7 @@ comparison:                   # DESIGN.md 1-1
 council:                      # AI 위원회 (DESIGN.md 8장)
   default: {provider: claude, model: claude-opus-5-5, effort: high}
   roles: {}                   # 역할별 다르게 쓰려면 예) red_team: {model: claude-sonnet-5-5}
-                              # 역할 이름: trend, regime, red_team, chair
+                              # 역할 이름: trend, regime, red_team, chair, evolution(C 트랙 수정안)
   fallback: {enabled: false, provider: gemini, model: ""}   # 기본 제공자 오류 시 예비 (기본 꺼짐)
   timeout_sec: 300            # 위원 1명 응답 대기 한도 (초과 시 skip)
   max_tokens: 16000
@@ -94,6 +101,27 @@ council:                      # AI 위원회 (DESIGN.md 8장)
     claude-sonnet-5-5: [2.0, 10.0]
     claude-haiku-5-5: [0.10, 0.50]
     claude-opus-4-8: [5.0, 25.0]
+
+councils:                     # 추가 위원회 (트랙 정의에서 council: <이름> 으로 고름)
+  gemini:                     # G 트랙용 비교 위원회. 키: .env 의 GEMINI_API_KEY
+    default: {provider: gemini, model: gemini-2.5-flash, effort: high}   # 모델 이름은 AI Studio 에서 확인 후 수정
+    roles: {}
+    fallback: {enabled: false}
+    timeout_sec: 120
+    max_tokens: 8000
+    max_meetings_per_day: 5   # 회의 1회 = 호출 4회. 무료 한도(예: 하루 20회)를 넘지 않게
+    free: true                # 무료 등급: 비용 0원으로 기록
+    usd_krw: 1400
+    pricing: {}
+
+evolution:                    # C 트랙 진화 루프 (DESIGN.md 9장)
+  fixed_days: 14              # 현재 버전 고정 운영 기간
+  exclude_recent_days: 14     # 수정안 검증에서 제외할 최근 기간
+  min_sharpe_gain: 0.2        # 워크포워드 표본 외 샤프가 현재보다 이만큼 높아야 통과
+  min_trades_ratio: 0.7       # 표본 외 거래 수가 현재의 70% 이상이어야 통과
+  shadow_days: 14             # 섀도 운영 기본 기간
+  max_shadow_days: 42         # 신호가 모자랄 때 최대 연장 기간
+  min_shadow_signals: 4       # 섀도 기간 두 버전 진입 신호 합계 최소
 
 live:                         # 실시간 루프 (DESIGN.md 12장)
   delay_after_close_sec: 15   # 봉 마감 후 이만큼 기다렸다가 처리

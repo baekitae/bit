@@ -67,12 +67,40 @@ class LiveRunner:
         self.window = int(cfg["strategy"]["window_bars"])
         self.boundary = int(cfg.get("day_boundary_utc_hour", 0)) * 3600
         self.max_delay_bars = float(cfg["data"]["max_candle_delay_bars"])
+        self.council = council
         self.tracks: list[Track] = build_tracks(conn, cfg, run_id, council=council)
+        self.evolutions = self._make_evolutions()
         units = {t.unit for t in self.tracks}
         if not units <= {240, 1440}:
             raise ValueError(f"실시간 루프는 4시간봉(240)·일봉(1440) 트랙만 지원합니다: {units}")
         log_event(conn, run_id, "live_start", ", ".join(f"{t.name}({t.strategy.name},{t.unit})" for t in self.tracks))
         conn.commit()
+
+    def _make_evolutions(self) -> list[Any]:
+        from src.evolution.manager import Evolution
+        from src.tracks.registry import track_defs
+        out = []
+        for name, d in track_defs(self.cfg).items():
+            if d["type"] == "evolving":
+                c = self.council.get("default") if isinstance(self.council, dict) else self.council
+                out.append(Evolution(self.conn, self.cfg, self.run_id, name, d["strategy"], d["params"], c))
+        return out
+
+    def _tick_evolution(self, now: int) -> list[str]:
+        """C 트랙 진화 단계 진행. 버전이 바뀌면 트랙을 다시 만든다."""
+        notes = []
+        changed = False
+        for ev in self.evolutions:
+            try:
+                changed = ev.tick(now) or changed
+            except Exception as e:   # 진화 루프 오류가 매매를 멈추게 하면 안 된다
+                log_event(self.conn, self.run_id, "evolution_error", f"{ev.track}: {type(e).__name__}: {e}")
+                self.conn.commit()
+                notes.append(f"{ev.track} 진화 루프 오류: {e}")
+        if changed:
+            self.tracks = build_tracks(self.conn, self.cfg, self.run_id, council=self.council)
+            notes.append("C 트랙 버전 변경 → 트랙 다시 구성: " + ", ".join(t.name for t in self.tracks))
+        return notes
 
     # ---- 데이터 ----
     def sync(self) -> str | None:
@@ -99,9 +127,11 @@ class LiveRunner:
         err = self.sync()
         frames = self.frames()
         now = int(self.now())
-        summary: dict[str, Any] = {"error": err, "processed": [], "caught_up": []}
+        summary: dict[str, Any] = {"error": err, "processed": [], "caught_up": [], "notes": []}
         if frames[240].empty:
             return summary
+        for ev in self.evolutions:
+            ev.ensure_initial(now)
         for t in self.tracks:
             frame = frames[t.unit]
             if len(frame) < 2:
@@ -128,6 +158,8 @@ class LiveRunner:
                 t.on_bar(w, int(ts[newest - 1]), now_ts=now, max_delay_bars=self.max_delay_bars)
                 summary["processed"].append((t.name, kst_str(int(ts[newest]))))
         update_signal_outcomes(self.conn, self.run_id)
+        if summary["processed"]:
+            summary["notes"] += self._tick_evolution(now)
         return summary
 
     # ---- 반복 ----
@@ -156,5 +188,7 @@ class LiveRunner:
             self.log(f"[{stamp}] {name}: 놓친 봉 {n}개 (소급 매매 없음)")
         for name, bar in s["processed"]:
             self.log(f"[{stamp}] {name}: {bar} 봉 처리")
+        for n in s.get("notes", []):
+            self.log(f"[{stamp}] {n}")
         if not s["processed"] and not s["caught_up"]:
             self.log(f"[{stamp}] 새로 마감된 봉 없음")
