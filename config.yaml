@@ -35,10 +35,23 @@ strategy:
     atr_period: 14
     atr_stop_mult: 2.0
 
-regime:                       # 2단계 국면 분류 (백테스트 전에 고정, DESIGN.md 6-3)
-  ma_period: 200
-  slope_bars: 20
-  slope_threshold: 0.02
+regime:                       # 국면 분류 (DESIGN.md 6-3). 백테스트 전에 고정, 결과를 본 뒤 바꾸지 않음
+  ma_hours: 800               # 기준 이동평균 기간 (4시간봉 200개 = 800시간)
+  slope_hours: 240            # 기울기 측정 구간 (10일). 80시간은 81%가 횡보로 분류돼 변경 (전략 성과 보기 전 결정)
+  slope_threshold: 0.02       # 기울기 임계값 (±2%)
+
+backtest:                     # 2단계 (DESIGN.md 6-3, 6-4)
+  train_ratio: 0.7            # 앞 70% 학습, 뒤 30% 검증
+  walk_forward:
+    train_months: 18
+    test_months: 6
+  min_trades_train: 15        # 학습 구간에서 이보다 거래가 적은 파라미터는 선택하지 않음
+  reject:                     # 탈락 기준
+    val_sharpe_ratio_min: 0.5     # 검증 샤프 < 학습 샤프 × 0.5 → 성과 붕괴
+    neighbor_profitable_min: 0.6  # 이웃 파라미터 중 수익 낸 비율 < 60% → 과최적화
+    neighbor_sharpe_gap_max: 0.5  # 선택값 샤프 - 이웃 샤프 중앙값 > 0.5 → 과최적화
+    min_trades_total: 30          # 전체 기간 거래 수 < 30 → 통계적 의미 부족
+    cost_stress_mult: 2.0         # 수수료·슬리피지 2배에서도 수익인지 확인
 
 comparison:                   # DESIGN.md 1-1
   months: 6

@@ -2,6 +2,9 @@
 
 사용법:
   python run.py fetch                 # 업비트 과거 캔들 수집 + 신규 봉 업데이트
+  python run.py fetch --unit 60       # 1시간봉 수집
+  python run.py backtest              # 2단계: 후보 전략 4개 비교 리포트 (reports/ 폴더)
+  python run.py backtest --unit 60    # 1시간봉으로 비교
   python run.py replay                # 과거 데이터로 A 트랙을 처음부터 끝까지 실행
   python run.py replay --run-id X     # 중단된 재생을 이어서 실행
   python run.py summary --run-id X    # 결과 요약
@@ -15,7 +18,7 @@ import argparse
 import math
 import sys
 
-from src.backtest.metrics import summarize
+from src.backtest.metrics import LABELS, PCT_KEYS, summarize
 from src.backtest.replay import new_run_id, replay
 from src.config import db_path, load_config
 from src.data.upbit import UpbitClient, find_gaps, kst_str, load_candles, since_years, sync_candles
@@ -25,11 +28,11 @@ from src.db import connect
 def _fmt(k: str, v) -> str:
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "-"
-    if k in ("기간_시작", "기간_끝"):
+    if k in ("start_ts", "end_ts"):
         return kst_str(v)
-    if k in ("누적수익률", "연환산수익률", "최대낙폭", "승률", "단순보유수익률"):
-        return f"{v:+.2%}" if k != "승률" else f"{v:.1%}"
-    if k in ("시작자금", "최종자산"):
+    if k in PCT_KEYS:
+        return f"{v:+.2%}" if k not in ("win_rate", "exposure") else f"{v:.1%}"
+    if k in ("initial", "final"):
         return f"{v:,.0f}원"
     if isinstance(v, float):
         return f"{v:.2f}"
@@ -37,7 +40,7 @@ def _fmt(k: str, v) -> str:
 
 
 def cmd_fetch(cfg, conn, args) -> None:
-    market, unit = cfg["market"], int(cfg["timeframe_minutes"])
+    market, unit = cfg["market"], int(args.unit or cfg["timeframe_minutes"])
     since = since_years(float(cfg["data"]["history_years"]))
     print(f"{market} {unit}분봉 수집 (시작: {kst_str(since)})")
     client = UpbitClient(interval_sec=float(cfg["data"]["request_interval_sec"]))
@@ -68,8 +71,33 @@ def print_summary(cfg, conn, run_id: str, track: str) -> None:
         print("  기록 없음")
         return
     for k, v in s.items():
-        print(f"  {k:<10} {_fmt(k, v)}")
+        print(f"  {LABELS.get(k, k):<12} {_fmt(k, v)}")
     print("  * 단순보유는 자금 100% 보유 기준, 전략은 1회 최대 30% 진입 기준입니다.")
+
+
+def cmd_backtest(cfg, conn, args) -> None:
+    from pathlib import Path
+
+    from src.backtest.engine import Market
+    from src.backtest.study import Study
+    from src.config import ROOT
+    from src.report.stage2 import write
+    from src.strategies import REGISTRY
+
+    unit = int(args.unit or cfg["timeframe_minutes"])
+    df = load_candles(conn, cfg["market"], unit)
+    if df.empty:
+        print(f"{unit}분봉 데이터가 없습니다. 먼저 `python run.py fetch --unit {unit}` 를 실행하세요.")
+        return
+    names = args.strategies or list(REGISTRY)
+    print(f"{cfg['market']} {unit}분봉 {len(df):,}개로 전략 {len(names)}개 비교")
+    market = Market(df, unit, int(cfg.get("day_boundary_utc_hour", 0)) * 3600)
+    study = Study(market, cfg)
+    reports = [study.evaluate(REGISTRY[n], progress=print) for n in names]
+    path = write(study, reports, cfg, ROOT / "reports")
+    print(f"\n리포트: {path}")
+    for r in reports:
+        print(f"  {r.label:<14} {'통과' if r.passed else '탈락'}  " + "; ".join(f"{f.level}:{f.rule}" for f in r.flags))
 
 
 def cmd_summary(cfg, conn, args) -> None:
@@ -96,7 +124,11 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="BTC AI 위원회 모의매매 봇")
     p.add_argument("--config", default=None, help="설정 파일 경로 (기본: config.yaml)")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("fetch", help="캔들 수집·업데이트")
+    fp = sub.add_parser("fetch", help="캔들 수집·업데이트")
+    fp.add_argument("--unit", type=int, default=None, help="봉 주기(분). 기본: config")
+    bp = sub.add_parser("backtest", help="2단계 전략 비교 리포트")
+    bp.add_argument("--unit", type=int, default=None, help="봉 주기(분). 기본: config")
+    bp.add_argument("--strategies", nargs="*", default=None)
     rp = sub.add_parser("replay", help="과거 데이터로 트랙 실행")
     rp.add_argument("--run-id", default=None)
     rp.add_argument("--tracks", nargs="*", default=None)
@@ -108,7 +140,7 @@ def main(argv=None) -> int:
     cfg = load_config(args.config)
     conn = connect(db_path(cfg))
     try:
-        {"fetch": cmd_fetch, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
+        {"fetch": cmd_fetch, "backtest": cmd_backtest, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
     finally:
         conn.close()
     return 0

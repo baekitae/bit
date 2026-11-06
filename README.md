@@ -3,7 +3,7 @@
 업비트 KRW-BTC에서 세 가지 방식(A: 규칙 전략, B: 규칙 + AI 필터, C: 규칙 + AI 필터 + 전략 진화)을
 같은 조건에서 모의매매로 비교하는 프로젝트입니다. 설계는 [DESIGN.md](DESIGN.md)를 기준으로 합니다.
 
-**현재: 1단계** (뼈대·데이터·모의매매 엔진, A 트랙만 작동). 실제 주문 코드는 없습니다.
+**현재: 2단계** (후보 전략 4개 백테스트·비교 리포트). 실제 주문 코드는 없습니다.
 
 ## 설치 (Windows)
 
@@ -20,6 +20,8 @@ copy .env.example .env
 
 ```bat
 python run.py fetch      :: 업비트 4시간봉 4년치 수집 (다시 실행하면 새 봉만 추가)
+python run.py backtest   :: 2단계: 후보 전략 4개 비교 → reports/stage2_240m.md
+python run.py fetch --unit 60 && python run.py backtest --unit 60   :: 1시간봉 비교
 python run.py replay     :: 과거 데이터로 A 트랙을 처음부터 끝까지 실행하고 요약 출력
 python run.py runs       :: 실행 목록
 python run.py summary --run-id replay-YYYYMMDD-HHMMSS

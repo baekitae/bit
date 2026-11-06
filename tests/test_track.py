@@ -200,8 +200,8 @@ def test_full_replay_with_ma_cross(conn, cfg):
     n = replay(conn, cfg, "r", ["A"])
     assert n == len(df)
     s = summarize(conn, "r", "A", UNIT)
-    assert s["거래횟수"] > 5
-    assert -1 < s["최대낙폭"] <= 0
+    assert s["trades"] > 5
+    assert -1 < s["mdd"] <= 0
     sig = conn.execute("SELECT COUNT(*) FROM signals WHERE run_id='r'").fetchone()[0]
     assert sig > 0
 
