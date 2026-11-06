@@ -15,7 +15,26 @@ costs:
 
 tracks:
   initial_cash: 1000000       # 트랙별 가상 시작 자금 (원)
-  enabled: [A]                # B는 3단계, C는 4단계에서 추가
+  # 실시간 모의매매에서 돌릴 트랙 (A 트랙을 먼저 처리한다)
+  enabled: [A1, A2, A3, A4, A5, B1, B2, B3, B4]
+  defs:
+    # A: 규칙 전략 그대로 (파라미터는 2단계 4시간봉 리포트에서 고른 값)
+    A1: {type: rule, strategy: donchian, timeframe: 240,
+         params: {entry_period: 55, exit_period: 10, atr_period: 14, atr_stop_mult: 2.5}}
+    A2: {type: rule, strategy: ma_cross, timeframe: 240,
+         params: {fast: 30, slow: 100, atr_period: 14, atr_stop_mult: 3.0}}
+    A3: {type: rule, strategy: rsi_reversion, timeframe: 240,
+         params: {rsi_period: 14, oversold: 30, exit_level: 70, atr_period: 14, atr_stop_mult: 2.0}}
+    A4: {type: rule, strategy: bollinger_reversion, timeframe: 240,
+         params: {bb_period: 40, bb_std: 3.0, exit_std: 2.0, atr_period: 14, atr_stop_mult: 2.0}}
+    A5: {type: rule, strategy: titan_rest, timeframe: 1440,     # 일봉 (사용자 설계 규칙 그대로)
+         params: {ma_short: 5, ma_mid: 20, ma_long: 60, rise_bars: 5, rs_period: 60,
+                  band_low: -0.02, band_high: 0.03, atr_period: 14, atr_stop_mult: 3.0, trail_pct: 0.12}}
+    # B: 짝 A 트랙과 같은 전략 + AI 위원회 필터
+    B1: {type: council, mirror: A1}
+    B2: {type: council, mirror: A2}
+    B3: {type: council, mirror: A3}
+    B4: {type: council, mirror: A4}
 
 day_boundary_utc_hour: 0      # 하루 기준 = UTC 00:00 = KST 09:00
 
@@ -61,9 +80,21 @@ comparison:                   # DESIGN.md 1-1
   months: 6
   min_signals: 30
 
-council:                      # 3단계부터 사용 (DESIGN.md 8-6)
-  default: { provider: claude, model: claude-sonnet-5-5 }
-  roles: {}
-  fallback: { enabled: false, provider: gemini, model: "" }
-  timeout_sec: 60
-  max_meetings_per_day: 6
+council:                      # AI 위원회 (DESIGN.md 8장)
+  default: {provider: claude, model: claude-opus-5-5, effort: high}
+  roles: {}                   # 역할별 다르게 쓰려면 예) red_team: {model: claude-sonnet-5-5}
+                              # 역할 이름: trend, regime, red_team, chair
+  fallback: {enabled: false, provider: gemini, model: ""}   # 기본 제공자 오류 시 예비 (기본 꺼짐)
+  timeout_sec: 300            # 위원 1명 응답 대기 한도 (초과 시 skip)
+  max_tokens: 16000
+  max_meetings_per_day: 8     # 하루 최대 소집 횟수 (B 트랙 전체 합계, 초과 시 skip)
+  usd_krw: 1400               # 비용 원화 환산
+  pricing:                    # 백만 토큰당 달러 [입력, 출력] (2026-10 기준, 바뀌면 수정)
+    claude-opus-5-5: [4.0, 20.0]
+    claude-sonnet-5-5: [2.0, 10.0]
+    claude-haiku-5-5: [0.10, 0.50]
+    claude-opus-4-8: [5.0, 25.0]
+
+live:                         # 실시간 루프 (DESIGN.md 12장)
+  delay_after_close_sec: 15   # 봉 마감 후 이만큼 기다렸다가 처리
+  max_late_sec: 900           # 마감 후 이보다 늦게 처리하게 된 봉은 매매하지 않음 (소급 매매 금지)

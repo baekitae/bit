@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS equity (
 -- 3단계: AI 위원회 회의 (DESIGN.md 8-5)
 CREATE TABLE IF NOT EXISTS council_meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),   -- UTC
     run_id TEXT NOT NULL,
     track TEXT NOT NULL,
     signal_id INTEGER,
@@ -163,12 +164,16 @@ CREATE TABLE IF NOT EXISTS council_meetings (
 CREATE TABLE IF NOT EXISTS signal_outcomes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
-    a_signal_id INTEGER NOT NULL,
+    a_signal_id INTEGER,              -- A 가 같은 봉에서 신호를 못 냈거나 기록이 없으면 NULL
     b_meeting_id INTEGER,
     b_decision TEXT,
     b_size_multiplier REAL,
     a_trade_id INTEGER,
-    a_pnl_pct REAL
+    a_pnl_pct REAL,
+    a_track TEXT,
+    b_track TEXT,
+    b_trade_id INTEGER,
+    b_pnl_pct REAL
 );
 
 -- 4단계: C 트랙 전략 버전 (DESIGN.md 9장)
@@ -209,10 +214,23 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """이전 버전 DB에 새 열 추가."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(positions)")}
-    for name in ("initial_stop", "peak_price", "trail_pct"):
-        if name not in cols:
-            conn.execute(f"ALTER TABLE positions ADD COLUMN {name} REAL")
+    # signal_outcomes.a_signal_id 의 NOT NULL 제거 (비어 있을 때만 다시 만든다)
+    info = {r[1]: r for r in conn.execute("PRAGMA table_info(signal_outcomes)")}
+    if info.get("a_signal_id") is not None and info["a_signal_id"][3] == 1:
+        if conn.execute("SELECT COUNT(*) FROM signal_outcomes").fetchone()[0] == 0:
+            conn.execute("DROP TABLE signal_outcomes")
+            conn.executescript(SCHEMA)
+    adds = {
+        "positions": [("initial_stop", "REAL"), ("peak_price", "REAL"), ("trail_pct", "REAL")],
+        "council_meetings": [("created_at", "TEXT")],
+        "signal_outcomes": [("a_track", "TEXT"), ("b_track", "TEXT"), ("b_trade_id", "INTEGER"),
+                            ("b_pnl_pct", "REAL")],
+    }
+    for table, columns in adds.items():
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, typ in columns:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
 
 
 def log_event(conn: sqlite3.Connection, run_id: str, event: str, detail: str | None = None) -> None:

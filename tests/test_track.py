@@ -4,7 +4,7 @@ import pytest
 from src.backtest.metrics import summarize
 from src.backtest.replay import replay
 from src.strategies.base import BUY, SELL
-from src.tracks.tracks import TrackA, TrackB, TrackC
+from src.tracks.tracks import TrackA, TrackC
 from tests.conftest import BAR, T0, UNIT, Scripted, make_candles, random_walk, run_bars, store_candles
 
 FEE = SLIP = 0.0005
@@ -206,8 +206,6 @@ def test_full_replay_with_ma_cross(conn, cfg):
     assert sig > 0
 
 
-def test_b_and_c_are_placeholders(conn, cfg):
-    with pytest.raises(NotImplementedError):
-        TrackB(conn, "t", cfg, Scripted({}), "v1")
+def test_c_is_placeholder(conn, cfg):
     with pytest.raises(NotImplementedError):
         TrackC(conn, "t", cfg, Scripted({}), "v1")

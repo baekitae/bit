@@ -10,7 +10,9 @@
   python run.py summary --run-id X    # 결과 요약
   python run.py runs                  # 실행 목록
 
-실시간 모의매매 루프(A·B 동시)는 3단계에서 추가합니다.
+  python run.py live                  # 3단계: 실시간 모의매매 (A1~A5, B1~B4)
+  python run.py council-test          # 실제 AI 로 위원회 1회 시험 (매매 없음)
+  streamlit run src/report/dashboard.py   # 대시보드
 """
 from __future__ import annotations
 
@@ -55,8 +57,11 @@ def cmd_fetch(cfg, conn, args) -> None:
 
 
 def cmd_replay(cfg, conn, args) -> None:
+    from src.tracks.registry import track_defs
     run_id = args.run_id or new_run_id()
-    tracks = args.tracks or cfg["tracks"]["enabled"]
+    base = int(cfg["timeframe_minutes"])
+    tracks = args.tracks or [n for n, d in track_defs(cfg).items()
+                             if d["type"] == "rule" and int(d["timeframe"]) == base]
     print(f"재생 시작: run_id={run_id}, 트랙={tracks}")
     n = replay(conn, cfg, run_id, tracks, progress=print)
     print(f"처리한 봉: {n}")
@@ -132,6 +137,79 @@ def cmd_infinite(cfg, conn, args) -> None:
               f"단순보유 {m['bh_return']:+.1%} (MDD {m['bh_mdd']:+.1%})")
 
 
+def make_council(cfg):
+    from src.council.council import Council
+    return Council(cfg)
+
+
+def cmd_live(cfg, conn, args) -> None:
+    """실시간 모의매매 (A·B 트랙 동시)."""
+    import os
+
+    from src.live import LiveRunner
+    from src.tracks.registry import track_defs
+
+    needs_ai = any(d["type"] == "council" for d in track_defs(cfg).values())
+    if needs_ai and not os.environ.get("ANTHROPIC_API_KEY"):
+        print("주의: ANTHROPIC_API_KEY 가 없습니다 (.env 확인). B 트랙 위원회는 오류로 처리되어 모두 skip 됩니다.")
+    client = UpbitClient(interval_sec=float(cfg["data"]["request_interval_sec"]))
+    runner = LiveRunner(conn, cfg, client, council=make_council(cfg) if needs_ai else None, run_id=args.run_id)
+    if args.once:
+        runner._report(runner.step())
+        return
+    try:
+        runner.run_forever()
+    except KeyboardInterrupt:
+        print("종료합니다. 다시 실행하면 DB에서 상태를 복원해 이어서 진행합니다.")
+
+
+def cmd_council_test(cfg, conn, args) -> None:
+    """실제 AI 로 위원회 1회 시험 (과거 마지막 진입 신호 기준, 매매 없음). 비용이 조금 듭니다."""
+    import json
+
+    from src.council.context import build_context
+    from src.strategies.base import BUY
+    from src.tracks.registry import build_tracks, track_defs
+
+    name = args.track
+    d = track_defs(cfg)[name]
+    if d["type"] != "council":
+        print(f"{name} 은 위원회 트랙이 아닙니다")
+        return
+    run_id = "council-test"
+    track = build_tracks(conn, cfg, run_id, [name], council=make_council(cfg))[0]
+    df = load_candles(conn, cfg["market"], 240)
+    if track.unit == 1440:
+        df = resample(df, 240, 1440, int(cfg.get("day_boundary_utc_hour", 0)) * 3600)
+    sig_df = track.strategy.compute(df)
+    idx = [i for i in range(len(df)) if sig_df["action"].iloc[i] == BUY]
+    if not idx:
+        print("과거 데이터에 진입 신호가 없습니다")
+        return
+    i = idx[-1]
+    window = int(cfg["strategy"]["window_bars"])
+    track.window = df.iloc[max(0, i - window + 1): i + 1]
+    sig = track.strategy.generate(track.window)
+    ts = int(df["ts"].iloc[i])
+    print(f"{name} ({track.strategy.label}) 의 마지막 진입 신호: {kst_str(ts)} 봉, 종가 {sig.price:,.0f}원")
+    print("위원회 소집 중... (역할 4개, 수십 초~몇 분)")
+    sid = track.account.record_signal(track.strategy.name, track.strategy_version, ts, sig)
+    ctx = build_context(track, sig, ts, cfg)
+    dec = track.council.decide(conn, run_id, name, sid, ts, ctx, sig.stop_loss, sig.price)
+    conn.commit()
+    row = conn.execute("SELECT * FROM council_meetings WHERE id=?", (dec.meeting_id,)).fetchone()
+    if dec.error:
+        print(f"실패 → skip 처리: {dec.error}")
+        return
+    for role, v in json.loads(row["transcript"]).items():
+        print(f"\n[{role}]\n{json.dumps(v, ensure_ascii=False, indent=2)}")
+    print(f"\n최종: {dec.decision} (비중 x{dec.size_multiplier:.2f}, 손절가 {dec.stop_loss:,.0f}, 확신 {dec.confidence:.2f})")
+    for n in dec.notes:
+        print(f"  - {n}")
+    print(f"토큰: 입력 {row['input_tokens']:,} / 출력 {row['output_tokens']:,}, 비용 약 {row['cost_krw']:,.0f}원, "
+          f"소요 {row['latency_sec']:.0f}초")
+
+
 def cmd_summary(cfg, conn, args) -> None:
     rows = conn.execute("SELECT track FROM tracks WHERE run_id=?", (args.run_id,)).fetchall()
     if not rows:
@@ -168,6 +246,11 @@ def main(argv=None) -> int:
     rp = sub.add_parser("replay", help="과거 데이터로 트랙 실행")
     rp.add_argument("--run-id", default=None)
     rp.add_argument("--tracks", nargs="*", default=None)
+    lp = sub.add_parser("live", help="실시간 모의매매 (A·B 트랙)")
+    lp.add_argument("--run-id", default="live")
+    lp.add_argument("--once", action="store_true", help="한 회차만 실행하고 종료")
+    cp = sub.add_parser("council-test", help="실제 AI 로 위원회 1회 시험 (매매 없음)")
+    cp.add_argument("--track", default="B1")
     ip = sub.add_parser("infinite", help="무한매수법 시뮬레이션 (일봉)")
     ip.add_argument("--years", type=float, nargs="*", default=[4, 10])
     sp = sub.add_parser("summary", help="결과 요약")
@@ -178,7 +261,8 @@ def main(argv=None) -> int:
     cfg = load_config(args.config)
     conn = connect(db_path(cfg))
     try:
-        {"fetch": cmd_fetch, "backtest": cmd_backtest, "infinite": cmd_infinite, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
+        {"fetch": cmd_fetch, "backtest": cmd_backtest, "infinite": cmd_infinite, "live": cmd_live,
+         "council-test": cmd_council_test, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
     finally:
         conn.close()
     return 0

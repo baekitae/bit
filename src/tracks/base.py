@@ -19,6 +19,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.db import log_event
 from src.paper.account import PaperAccount
 from src.paper.fills import Costs, stop_trigger_price
 from src.risk.gate import EntryRequest, RiskGate, check_bar
@@ -44,10 +45,15 @@ class Track:
         cfg: dict[str, Any],
         strategy: Strategy,
         strategy_version: str,
+        name: str | None = None,
+        unit: int | None = None,
     ):
         self.conn = conn
         self.run_id = run_id
-        self.unit = int(cfg["timeframe_minutes"])
+        if name:
+            self.name = name
+        self.unit = int(unit or cfg["timeframe_minutes"])
+        self.window: pd.DataFrame | None = None   # 방금 처리 중인 봉까지의 데이터 (위원회 입력용)
         self.bar_sec = self.unit * 60
         self.day_boundary_sec = int(cfg.get("day_boundary_utc_hour", 0)) * 3600
         self.strategy = strategy
@@ -60,8 +66,40 @@ class Track:
         )
 
     # B·C 트랙이 재정의한다
-    def decide_entry(self, signal: Signal, bar_ts: int) -> EntryDecision:
+    def decide_entry(self, signal: Signal, bar_ts: int, signal_id: int) -> EntryDecision:
         raise NotImplementedError
+
+    def catch_up(self, missed: pd.DataFrame, latest_close: float, note: str) -> None:
+        """재시작 처리 (DESIGN.md 12장): 꺼져 있던 동안 놓친 봉들.
+
+        - 소급 매매하지 않는다. 대기 주문은 취소한다.
+        - 놓친 봉 중에 손절가를 건드린 봉이 있으면 지금 가격(latest_close)으로 청산하고 "지연 손절"로 기록한다.
+        - 놓친 봉들의 자산은 종가로 평가만 기록한다.
+        """
+        acc = self.account
+        st = acc.state
+        if missed.empty:
+            return
+        try:
+            for o in acc.pending_orders():
+                acc.cancel_order(o["id"], "프로그램 중단으로 체결 봉을 놓쳐 취소")
+            pos = acc.position()
+            if pos is not None and float(missed["low"].min()) <= pos.stop_loss:
+                last_ts = int(missed["ts"].iloc[-1])
+                oid = acc.place_order("sell", "delayed_stop", last_ts, note="중단 중 손절가 도달 → 재시작 시 청산")
+                _, pnl = acc.close_position(oid, last_ts, latest_close, "delayed_stop")
+                self._after_trade(pnl, last_ts + self.bar_sec)
+            for r in missed.itertuples():
+                st.day_key = self.day_key(int(r.ts))
+                acc.record_equity(int(r.ts), float(r.close))
+            st.last_bar_ts = int(missed["ts"].iloc[-1])
+            acc.save_state()
+            log_event(self.conn, self.run_id, "missed_bars",
+                      f"{self.name}: {len(missed)}개 봉 건너뜀 ({note})")
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def day_key(self, bar_ts: int) -> str:
         return datetime.fromtimestamp(bar_ts - self.day_boundary_sec, tz=timezone.utc).strftime("%Y-%m-%d")
@@ -77,6 +115,7 @@ class Track:
         """방금 마감된 봉(window 마지막 행)을 처리한다. 이미 처리한 봉이면 False."""
         acc = self.account
         st = acc.state
+        self.window = window
         bar = window.iloc[-1]
         ts = int(bar["ts"])
         if st.last_bar_ts is not None and ts <= st.last_bar_ts:
@@ -153,7 +192,7 @@ class Track:
         decision = None
         if not has_position and not has_pending and data_ok and not system_error:
             try:
-                decision = self.decide_entry(sig, ts)
+                decision = self.decide_entry(sig, ts, sig_id)
             except Exception as e:  # 결정 실패 → 신규 진입 안 함
                 decision = EntryDecision(0.0, None, error=f"결정 오류: {e}")
         if decision is None:

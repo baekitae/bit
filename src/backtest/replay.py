@@ -11,19 +11,18 @@ from typing import Any, Callable
 
 from src.data.upbit import load_candles
 from src.db import log_event
-from src.strategies import make_strategy
 from src.tracks.base import Track
-from src.tracks.tracks import TRACKS
+from src.tracks.registry import build_tracks as _build
 
 
 def build_tracks(conn: sqlite3.Connection, cfg: dict[str, Any], run_id: str,
                  names: list[str]) -> list[Track]:
-    s = cfg["strategy"]
-    out = []
-    for n in names:
-        strategy = make_strategy(s["name"], s.get("params"))
-        out.append(TRACKS[n](conn, run_id, cfg, strategy, s["version"]))
-    return out
+    """재생은 규칙(A) 트랙만 허용한다. AI 는 과거 가격을 학습으로 알고 있어 과거 재생이 공정하지 않다 (DESIGN.md 1-1)."""
+    tracks = _build(conn, cfg, run_id, names, council=None)
+    units = {t.unit for t in tracks}
+    if units != {int(cfg["timeframe_minutes"])}:
+        raise ValueError("재생은 기본 봉 주기(config timeframe_minutes)의 트랙만 지원합니다")
+    return tracks
 
 
 def new_run_id(prefix: str = "replay") -> str:
