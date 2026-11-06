@@ -1,0 +1,9 @@
+pandas>=2.0
+numpy>=1.24
+requests>=2.31
+PyYAML>=6.0
+python-dotenv>=1.0
+pytest>=7.0
+# 3단계 이후
+# anthropic
+# streamlit

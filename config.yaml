@@ -1,0 +1,52 @@
+# 모든 설정값은 여기서 관리합니다 (코드에 하드코딩 금지). DESIGN.md 4장·7장 참고.
+
+market: KRW-BTC
+timeframe_minutes: 240        # 4시간봉. 1시간봉은 60
+db_path: data/bot.db          # 프로젝트 폴더 기준 상대 경로
+
+data:
+  history_years: 4            # 과거 데이터 수집 기간
+  request_interval_sec: 0.12  # 업비트 API 호출 간격 (호출 제한 준수)
+  max_candle_delay_bars: 1    # 실시간: 최신 마감 봉이 이보다 늦으면 데이터 이상
+
+costs:
+  fee_rate: 0.0005            # 편도 0.05%
+  slippage_rate: 0.0005       # 편도 0.05%
+
+tracks:
+  initial_cash: 1000000       # 트랙별 가상 시작 자금 (원)
+  enabled: [A]                # B는 3단계, C는 4단계에서 추가
+
+day_boundary_utc_hour: 0      # 하루 기준 = UTC 00:00 = KST 09:00
+
+risk:
+  max_position_pct: 0.30      # 1회 진입 최대 비중 (= 최대 노출, 트랙당 포지션 1개)
+  daily_loss_pct: 0.03        # 당일 시작 자산 대비 손실이 이 이상이면 당일 신규 진입 중단
+  max_consecutive_losses: 5   # 연속 손실 횟수
+  cooldown_hours: 24          # 연속 손실 시 신규 진입 중단 시간
+
+strategy:
+  name: ma_cross              # 1단계 임시 전략
+  version: v1
+  window_bars: 500            # 전략에 넘기는 최근 봉 수 (백테스트·실시간 동일하게 고정)
+  params:
+    fast: 20
+    slow: 60
+    atr_period: 14
+    atr_stop_mult: 2.0
+
+regime:                       # 2단계 국면 분류 (백테스트 전에 고정, DESIGN.md 6-3)
+  ma_period: 200
+  slope_bars: 20
+  slope_threshold: 0.02
+
+comparison:                   # DESIGN.md 1-1
+  months: 6
+  min_signals: 30
+
+council:                      # 3단계부터 사용 (DESIGN.md 8-6)
+  default: { provider: claude, model: claude-sonnet-5-5 }
+  roles: {}
+  fallback: { enabled: false, provider: gemini, model: "" }
+  timeout_sec: 60
+  max_meetings_per_day: 6
