@@ -55,8 +55,11 @@ CREATE TABLE IF NOT EXISTS positions (
     entry_price REAL NOT NULL,
     entry_cost REAL NOT NULL,         -- 수수료 포함 매수 총액
     entry_ts INTEGER NOT NULL,
-    stop_loss REAL NOT NULL,
+    stop_loss REAL NOT NULL,          -- 현재 손절가 (트레일링 시 올라감)
     entry_order_id INTEGER NOT NULL,
+    initial_stop REAL,                -- 진입 시 손절가
+    peak_price REAL,                  -- 진입 후 최고가 (트레일링 스탑용)
+    trail_pct REAL,
     PRIMARY KEY (run_id, track)
 );
 
@@ -199,8 +202,17 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """이전 버전 DB에 새 열 추가."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(positions)")}
+    for name in ("initial_stop", "peak_price", "trail_pct"):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {name} REAL")
 
 
 def log_event(conn: sqlite3.Connection, run_id: str, event: str, detail: str | None = None) -> None:

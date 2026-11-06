@@ -90,6 +90,7 @@ class StrategyReport:
     regimes: list[dict[str, Any]]
     entry_signals_per_6m: float
     rejections: dict[str, int]
+    fixed: bool = False
     flags: list[Flag] = field(default_factory=list)
     curves: dict[str, Any] = field(default_factory=dict)
 
@@ -153,12 +154,12 @@ class Study:
             t0 += te
         return out
 
-    def walk_forward(self, cls) -> dict[str, Any]:
+    def walk_forward(self, cls, fixed: dict[str, Any] | None = None) -> dict[str, Any]:
         initial = float(self.cfg["tracks"]["initial_cash"])
         rets, trades, closes, inpos, fold_rows = [], [], [], [], []
         first_ts = last_ts = None
         for (a, b, c, d) in self.folds():
-            p, _ = self.search(cls, a, b)
+            p = fixed if fixed is not None else self.search(cls, a, b)[0]
             r, m = self.run(cls, p, c, d)
             eq = np.concatenate([[initial], r.equity])
             rets.append(eq[1:] / eq[:-1] - 1)
@@ -178,12 +179,19 @@ class Study:
         return {"folds": fold_rows, "oos": oos, "equity": chained}
 
     # ---- 전체 평가 ----
-    def evaluate(self, cls: type[Strategy], progress: Callable[[str], None] | None = None) -> StrategyReport:
+    def evaluate(self, cls: type[Strategy], progress: Callable[[str], None] | None = None,
+                 fixed: dict[str, Any] | None = None) -> StrategyReport:
+        """fixed 를 주면 파라미터를 탐색하지 않고 그 값 그대로 검증한다 (사용자가 정한 규칙 검증용).
+        이웃 파라미터 민감도는 격자로 계산한다."""
         say = progress or (lambda s: None)
         n = len(self.market)
         a, b, c, d = 0, self.split - 1, self.split, n - 1
         say(f"  [{cls.label}] 학습 구간 격자 탐색")
         best, table = self.search(cls, a, b)
+        if fixed is not None:
+            best = {**cls.defaults, **fixed}
+            if _key(best) not in table:
+                table[_key(best)] = self.run(cls, best, a, b)[1]
         train_m = table[_key(best)]
         val_r, val_m = self.run(cls, best, c, d)
 
@@ -205,7 +213,7 @@ class Study:
         _, stress_m = self.run(cls, best, a, d, Costs(fee * mult, slip * mult))
 
         say(f"  [{cls.label}] 워크포워드")
-        wf = self.walk_forward(cls)
+        wf = self.walk_forward(cls, best if fixed is not None else None)
 
         months = (int(self.market.ts[d]) - int(self.market.ts[a])) / MONTH_SEC
         rep = StrategyReport(
@@ -215,6 +223,7 @@ class Study:
             regimes=regime_breakdown(self.market, full_r, self.regimes),
             entry_signals_per_6m=full_r.entry_signals / months * 6 if months > 0 else float("nan"),
             rejections=full_r.rejections,
+            fixed=fixed is not None,
         )
         rep.curves = {
             "full_ts": self.market.ts[a: d + 1], "full_equity": full_r.equity,

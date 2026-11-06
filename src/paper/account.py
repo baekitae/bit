@@ -32,6 +32,9 @@ class Position:
     entry_ts: int
     stop_loss: float
     entry_order_id: int
+    initial_stop: float
+    peak_price: float
+    trail_pct: float | None
 
 
 class PaperAccount:
@@ -85,7 +88,10 @@ class PaperAccount:
         if row is None:
             return None
         return Position(row["qty"], row["entry_price"], row["entry_cost"], row["entry_ts"],
-                        row["stop_loss"], row["entry_order_id"])
+                        row["stop_loss"], row["entry_order_id"],
+                        row["initial_stop"] if row["initial_stop"] is not None else row["stop_loss"],
+                        row["peak_price"] if row["peak_price"] is not None else row["entry_price"],
+                        row["trail_pct"])
 
     def pending_orders(self) -> list[sqlite3.Row]:
         return self.conn.execute(
@@ -143,7 +149,7 @@ class PaperAccount:
 
     # ---- 체결 ----
     def fill_buy(self, order_id: int, bar_ts: int, ref_price: float, target_notional: float,
-                 stop_loss: float) -> Fill | None:
+                 stop_loss: float, trail_pct: float | None = None) -> Fill | None:
         spend = min(target_notional, self.state.cash)
         if spend <= 0:
             self.cancel_order(order_id, "현금 부족")
@@ -153,11 +159,24 @@ class PaperAccount:
         self._mark_filled(order_id, bar_ts, f)
         self.conn.execute(
             """INSERT INTO positions (run_id, track, qty, entry_price, entry_cost, entry_ts,
-                                      stop_loss, entry_order_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (*self.key, f.qty, f.price, -f.cash_delta, bar_ts, stop_loss, order_id),
+                                      stop_loss, entry_order_id, initial_stop, peak_price, trail_pct)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (*self.key, f.qty, f.price, -f.cash_delta, bar_ts, stop_loss, order_id,
+             stop_loss, f.price, trail_pct),
         )
         return f
+
+    def update_trailing(self, high: float) -> None:
+        """봉 마감 후 최고가 갱신과 트레일링 손절가 상향 (내리지는 않음)."""
+        pos = self.position()
+        if pos is None or not pos.trail_pct:
+            return
+        peak = max(pos.peak_price, high)
+        stop = max(pos.stop_loss, peak * (1 - pos.trail_pct))
+        self.conn.execute(
+            "UPDATE positions SET peak_price=?, stop_loss=? WHERE run_id=? AND track=?",
+            (peak, stop, *self.key),
+        )
 
     def close_position(self, order_id: int, bar_ts: int, ref_price: float, exit_kind: str) -> tuple[Fill, float]:
         """보유 포지션 전량 청산. (체결, 손익) 반환."""

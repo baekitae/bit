@@ -16,6 +16,7 @@ CASES = [
     ("donchian", {"entry_period": 20, "exit_period": 10, "atr_stop_mult": 2.0}),
     ("rsi_reversion", {"rsi_period": 7, "oversold": 30.0, "exit_level": 55.0}),
     ("bollinger_reversion", {"bb_period": 20, "bb_std": 2.0, "exit_std": 0.0}),
+    ("titan_rest", {"ma_mid": 15, "ma_long": 40, "rs_period": 20, "band_high": 0.05, "trail_pct": 0.06}),
 ]
 
 
@@ -36,6 +37,8 @@ def test_engine_matches_track_replay(conn, cfg, name, params):
     assert len(tr_db) == len(res.trades) > 3
     np.testing.assert_allclose(res.trades["pnl"], tr_db["pnl"], rtol=1e-9)
     assert list(res.trades["exit_kind"]) == list(tr_db["exit_kind"])
+    if name == "titan_rest":
+        assert "trail_stop" in set(tr_db["exit_kind"])     # 트레일링 스탑이 실제로 작동
 
     m1 = result_metrics(market, res)
     m2 = summarize(conn, "r", "A", UNIT)
@@ -64,7 +67,8 @@ def test_signals_are_events_and_causal(name):
     a = s.compute(df)["action"]
     b = s.compute(df.iloc[:600])["action"]
     assert (a.iloc[:600].to_numpy() == b.to_numpy()).all()        # 미래 데이터가 과거 신호를 바꾸지 않음
-    assert (a == "buy").sum() > 0 and (a == "sell").sum() > 0
+    assert (a == "buy").sum() > 0
+    assert (a == "sell").sum() > 0 or name == "titan_rest"   # 타이탄은 손절·트레일링으로만 청산
     buys = np.flatnonzero(a.to_numpy() == "buy")
     assert not np.any(np.diff(buys) == 1) or name == "rsi_reversion"  # 연속 봉 매수 신호 없음(사건 기반)
 

@@ -40,7 +40,8 @@ def render(study: Study, reports: list[StrategyReport], cfg: dict[str, Any]) -> 
     unit = m.unit
     L: list[str] = []
     a = L.append
-    a(f"# 2단계 규칙 전략 비교 리포트 ({unit // 60 if unit >= 60 else unit}{'시간' if unit >= 60 else '분'}봉)")
+    tf = "일봉" if unit == 1440 else (f"{unit // 60}시간봉" if unit >= 60 else f"{unit}분봉")
+    a(f"# 규칙 전략 비교 리포트 ({tf})")
     a("")
     a(f"- 생성: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')} KST")
     a(f"- 데이터: {cfg['market']} {unit}분봉 {n:,}개, {_d(m.ts[0])} ~ {_d(m.ts[-1])}")
@@ -83,7 +84,10 @@ def render(study: Study, reports: list[StrategyReport], cfg: dict[str, Any]) -> 
         a("")
         a(f"### {r.label} (`{r.name}`)")
         a("")
-        a(f"- 선택 파라미터: `{_params(r.params)}` (격자 {r.grid_size}개 중)")
+        if r.fixed:
+            a(f"- 파라미터: `{_params(r.params)}` (**고정값 그대로 검증**, 탐색하지 않음 / 민감도 비교용 격자 {r.grid_size}개)")
+        else:
+            a(f"- 선택 파라미터: `{_params(r.params)}` (격자 {r.grid_size}개 중)")
         if r.flags:
             for f in r.flags:
                 a(f"- **{f.level}** — {f.rule}: {f.detail}")
@@ -162,9 +166,10 @@ def to_json(reports: list[StrategyReport]) -> str:
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
-def write(study: Study, reports: list[StrategyReport], cfg: dict[str, Any], out_dir: Path) -> Path:
+def write(study: Study, reports: list[StrategyReport], cfg: dict[str, Any], out_dir: Path,
+          suffix: str | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    tag = f"{study.market.unit}m"
+    tag = f"{study.market.unit}m" + (f"_{suffix}" if suffix else "")
     md = out_dir / f"stage2_{tag}.md"
     md.write_text(render(study, reports, cfg), encoding="utf-8")
     (out_dir / f"stage2_{tag}.json").write_text(to_json(reports), encoding="utf-8")

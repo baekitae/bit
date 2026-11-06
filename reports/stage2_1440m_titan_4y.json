@@ -1,0 +1,304 @@
+[
+  {
+    "name": "titan_rest",
+    "label": "타이탄 휴식 기법",
+    "params": {
+      "ma_short": 5,
+      "ma_mid": 20,
+      "ma_long": 60,
+      "rise_bars": 5,
+      "rs_period": 60,
+      "band_low": -0.02,
+      "band_high": 0.03,
+      "atr_period": 14,
+      "atr_stop_mult": 3.0,
+      "trail_pct": 0.12
+    },
+    "grid_size": 108,
+    "train": {
+      "start_ts": 1667606400,
+      "end_ts": 1755907200,
+      "initial": 1000000.0,
+      "final": 1292250.6123078477,
+      "total_return": 0.29225061230784766,
+      "cagr": 0.09595805432376436,
+      "mdd": -0.07250938221612556,
+      "sharpe": 1.0544957587634365,
+      "calmar": 1.323388110489569,
+      "trades": 9,
+      "win_rate": 0.3333333333333333,
+      "payoff": 6.626888042403291,
+      "profit_factor": 3.3134440212016454,
+      "avg_trade": 0.08191590738856441,
+      "stop_exits": 2,
+      "exposure": 0.4281524926686217,
+      "bh_return": 4.367152843124076,
+      "bh_mdd": -0.29275273237164096
+    },
+    "val": {
+      "start_ts": 1755993600,
+      "end_ts": 1793836800,
+      "initial": 1000000.0,
+      "final": 946418.9674008868,
+      "total_return": -0.053581032599113176,
+      "cagr": -0.04488453177818441,
+      "mdd": -0.057160644146989445,
+      "sharpe": -1.0026163262369692,
+      "calmar": -0.7852348840360016,
+      "trades": 4,
+      "win_rate": 0.25,
+      "payoff": 0.07955082032891851,
+      "profit_factor": 0.026516940109639505,
+      "avg_trade": -0.045445892445838326,
+      "stop_exits": 2,
+      "exposure": 0.25740318906605925,
+      "bh_return": -0.3448284613871563,
+      "bh_mdd": -0.49935678132250255
+    },
+    "full": {
+      "start_ts": 1667606400,
+      "end_ts": 1793836800,
+      "initial": 1000000.0,
+      "final": 1196367.8266945658,
+      "total_return": 0.19636782669456587,
+      "cagr": 0.0458422471368678,
+      "mdd": -0.09186150216053197,
+      "sharpe": 0.5995654139564831,
+      "calmar": 0.4990365502270633,
+      "trades": 14,
+      "win_rate": 0.35714285714285715,
+      "payoff": 3.9182336717017954,
+      "profit_factor": 2.1767964842787753,
+      "avg_trade": 0.047260317825421776,
+      "stop_exits": 4,
+      "exposure": 0.38235294117647056,
+      "bh_return": 2.4701236725366313,
+      "bh_mdd": -0.49935678132250255
+    },
+    "full_gross": {
+      "start_ts": 1667606400,
+      "end_ts": 1793836800,
+      "initial": 1000000.0,
+      "final": 1206739.6160506364,
+      "total_return": 0.2067396160506363,
+      "cagr": 0.04810162085038838,
+      "mdd": -0.08917714092474176,
+      "sharpe": 0.6273041325463714,
+      "calmar": 0.5393940683855545,
+      "trades": 14,
+      "win_rate": 0.35714285714285715,
+      "payoff": 4.101426189661198,
+      "profit_factor": 2.278570105367332,
+      "avg_trade": 0.04935693455364664,
+      "stop_exits": 4,
+      "exposure": 0.38235294117647056,
+      "bh_return": 2.4701236725366313,
+      "bh_mdd": -0.49935678132250255
+    },
+    "full_stress": {
+      "start_ts": 1667606400,
+      "end_ts": 1793836800,
+      "initial": 1000000.0,
+      "final": 1186099.2627189036,
+      "total_return": 0.18609926271890354,
+      "cagr": 0.0435908412317938,
+      "mdd": -0.09562673901248336,
+      "sharpe": 0.571900006669643,
+      "calmar": 0.45584364459090604,
+      "trades": 14,
+      "win_rate": 0.35714285714285715,
+      "payoff": 3.747764835648762,
+      "profit_factor": 2.082091575360423,
+      "avg_trade": 0.045167889095394195,
+      "stop_exits": 4,
+      "exposure": 0.38235294117647056,
+      "bh_return": 2.4701236725366313,
+      "bh_mdd": -0.49935678132250255
+    },
+    "neighbor_stats": {
+      "count": 8,
+      "profitable_share": 1.0,
+      "median_sharpe": 0.9685636248558059,
+      "min_sharpe": 0.2818325417587472,
+      "grid_profitable_share": 0.9629629629629629
+    },
+    "walk_forward": {
+      "folds": [
+        {
+          "test_start": 1714953600,
+          "test_end": 1730678400,
+          "params": {
+            "ma_short": 5,
+            "ma_mid": 20,
+            "ma_long": 60,
+            "rise_bars": 5,
+            "rs_period": 60,
+            "band_low": -0.02,
+            "band_high": 0.03,
+            "atr_period": 14,
+            "atr_stop_mult": 3.0,
+            "trail_pct": 0.12
+          },
+          "total_return": -0.009290319418851944,
+          "bh_return": 0.06176523580018922,
+          "trades": 0,
+          "mdd": -0.009290319418851984
+        },
+        {
+          "test_start": 1730764800,
+          "test_end": 1746489600,
+          "params": {
+            "ma_short": 5,
+            "ma_mid": 20,
+            "ma_long": 60,
+            "rise_bars": 5,
+            "rs_period": 60,
+            "band_low": -0.02,
+            "band_high": 0.03,
+            "atr_period": 14,
+            "atr_stop_mult": 3.0,
+            "trail_pct": 0.12
+          },
+          "total_return": -0.04439302738258433,
+          "bh_return": 0.42871997504419257,
+          "trades": 3,
+          "mdd": -0.06166494229538192
+        },
+        {
+          "test_start": 1746576000,
+          "test_end": 1762214400,
+          "params": {
+            "ma_short": 5,
+            "ma_mid": 20,
+            "ma_long": 60,
+            "rise_bars": 5,
+            "rs_period": 60,
+            "band_low": -0.02,
+            "band_high": 0.03,
+            "atr_period": 14,
+            "atr_stop_mult": 3.0,
+            "trail_pct": 0.12
+          },
+          "total_return": 0.004394988258196841,
+          "bh_return": 0.11051140491064948,
+          "trades": 2,
+          "mdd": -0.05762414709969533
+        },
+        {
+          "test_start": 1762300800,
+          "test_end": 1778025600,
+          "params": {
+            "ma_short": 5,
+            "ma_mid": 20,
+            "ma_long": 60,
+            "rise_bars": 5,
+            "rs_period": 60,
+            "band_low": -0.02,
+            "band_high": 0.03,
+            "atr_period": 14,
+            "atr_stop_mult": 3.0,
+            "trail_pct": 0.12
+          },
+          "total_return": 0.018550007205286656,
+          "bh_return": -0.23469309266191474,
+          "trades": 1,
+          "mdd": -0.019140060535129975
+        },
+        {
+          "test_start": 1778112000,
+          "test_end": 1793750400,
+          "params": {
+            "ma_short": 5,
+            "ma_mid": 20,
+            "ma_long": 60,
+            "rise_bars": 5,
+            "rs_period": 60,
+            "band_low": -0.02,
+            "band_high": 0.03,
+            "atr_period": 14,
+            "atr_stop_mult": 3.0,
+            "trail_pct": 0.12
+          },
+          "total_return": -0.036321727813010685,
+          "bh_return": -0.08116475537762091,
+          "trades": 2,
+          "mdd": -0.04337489066381296
+        }
+      ],
+      "oos": {
+        "start_ts": 1714953600,
+        "end_ts": 1793750400,
+        "initial": 1000000.0,
+        "final": 933350.3119013524,
+        "total_return": -0.06664968809864769,
+        "cagr": -0.027245854688746518,
+        "mdd": -0.07613017715490239,
+        "sharpe": -0.5087267987112652,
+        "calmar": -0.3578850819341884,
+        "trades": 8,
+        "win_rate": 0.125,
+        "payoff": 1.4005168630299185,
+        "profit_factor": 0.20007383757570266,
+        "avg_trade": -0.04206800245893268,
+        "stop_exits": 4,
+        "exposure": 0.2946330777656079,
+        "bh_return": 0.21984370073420112,
+        "bh_mdd": -0.49935678132250255
+      }
+    },
+    "regimes": [
+      {
+        "regime": "상승장",
+        "share": 0.3173734610123119,
+        "strategy_return": 0.25172610617478264,
+        "bh_return": 2.1617289372136197,
+        "trades": 11,
+        "win_rate": 0.2727272727272727,
+        "avg_trade": 0.015338037533180577
+      },
+      {
+        "regime": "하락장",
+        "share": 0.16210670314637482,
+        "strategy_return": 0.0,
+        "bh_return": 0.31453310462146145,
+        "trades": 0,
+        "win_rate": null,
+        "avg_trade": null
+      },
+      {
+        "regime": "횡보장",
+        "share": 0.4911080711354309,
+        "strategy_return": -0.04422555318382548,
+        "bh_return": 0.11759352927869493,
+        "trades": 3,
+        "win_rate": 0.6666666666666666,
+        "avg_trade": 0.16430867889697284
+      }
+    ],
+    "entry_signals_per_6m": 5.625,
+    "rejections": {},
+    "flags": [
+      {
+        "level": "탈락",
+        "rule": "검증 구간 성과 붕괴",
+        "detail": "검증 수익률 -5.4%"
+      },
+      {
+        "level": "탈락",
+        "rule": "워크포워드 표본 외 손실",
+        "detail": "표본 외 수익률 -6.7%"
+      },
+      {
+        "level": "탈락",
+        "rule": "거래 수 부족",
+        "detail": "전체 기간 14회"
+      },
+      {
+        "level": "주의",
+        "rule": "6개월 신호 수 부족 예상",
+        "detail": "6개월당 진입 신호 약 6건 (기준 30건)"
+      }
+    ],
+    "passed": false
+  }
+]

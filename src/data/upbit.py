@@ -184,3 +184,29 @@ def find_gaps(df: pd.DataFrame, unit: int) -> list[tuple[int, int]]:
     diffs = ts[1:] - ts[:-1]
     idx = (diffs != unit * 60).nonzero()[0]
     return [(int(ts[i]), int(ts[i + 1])) for i in idx]
+
+
+def resample(df: pd.DataFrame, unit_from: int, unit_to: int, boundary_sec: int = 0) -> pd.DataFrame:
+    """짧은 봉을 긴 봉으로 합친다 (예: 4시간봉 → 일봉). 경계는 UTC 00:00 + boundary_sec.
+
+    마지막 묶음이 아직 다 차지 않았으면(진행 중) 버린다. 업비트 누락으로 중간 묶음이 덜 찬 것은 유지한다.
+    """
+    if df.empty:
+        return df
+    size = unit_to * 60
+    key = (df["ts"] - boundary_sec) // size
+    g = df.groupby(key, sort=True)
+    out = pd.DataFrame({
+        "ts": g["ts"].first().index.to_numpy() * size + boundary_sec,
+        "open": g["open"].first().to_numpy(),
+        "high": g["high"].max().to_numpy(),
+        "low": g["low"].min().to_numpy(),
+        "close": g["close"].last().to_numpy(),
+        "volume": g["volume"].sum().to_numpy(),
+        "value": g["value"].sum().to_numpy(),
+    })
+    last_bar_end = int(df["ts"].iloc[-1]) + unit_from * 60
+    if int(out["ts"].iloc[-1]) + size > last_bar_end:
+        out = out.iloc[:-1]
+    out.insert(1, "kst", [kst_str(int(t)) for t in out["ts"]])
+    return out.reset_index(drop=True)

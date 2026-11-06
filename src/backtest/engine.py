@@ -60,13 +60,14 @@ class Market:
 class Signals:
     action: np.ndarray       # "buy" / "sell" / "hold"
     stop_loss: np.ndarray
+    trail_pct: float | None = None
 
     @classmethod
     def from_strategy(cls, strategy, market: Market) -> "Signals":
         df = strategy.compute(market.candles)
         action = df["action"].to_numpy().copy()
         action[: strategy.min_bars - 1] = "hold"   # generate() 와 동일하게 데이터 부족 구간은 관망
-        return cls(action, df["stop_loss"].to_numpy(float))
+        return cls(action, df["stop_loss"].to_numpy(float), strategy.trail_pct)
 
 
 @dataclass
@@ -107,14 +108,15 @@ def run_backtest(
     entry_signals = 0
 
     cash = initial
-    pos = None            # (qty, entry_price, entry_cost, entry_idx, stop)
+    pos = None            # [qty, entry_price, entry_cost, entry_idx, stop, initial_stop, peak]
+    trail = signals.trail_pct
     pending = None        # ("buy", target, stop) | ("sell",)
     streak, cooldown = 0, None
     cur_day, day_start, last_eq = None, None, None
 
     def close_pos(i: int, ref: float, kind: str) -> None:
         nonlocal cash, pos, streak, cooldown
-        qty, ep, cost, eidx, _ = pos
+        qty, ep, cost, eidx = pos[:4]
         f = sell_fill(ref, qty, costs)
         cash += f.cash_delta
         pnl = f.cash_delta - cost
@@ -136,7 +138,7 @@ def run_backtest(
                     if spend > 0:
                         f = buy_fill(o[i], spend, costs)
                         cash += f.cash_delta
-                        pos = (f.qty, f.price, -f.cash_delta, i, pending[2])
+                        pos = [f.qty, f.price, -f.cash_delta, i, pending[2], pending[2], f.price]
             elif pos is not None:
                 close_pos(i, o[i], "exit_signal")
             pending = None
@@ -144,7 +146,11 @@ def run_backtest(
         if pos is not None:
             ref = stop_trigger_price(o[i], l[i], pos[4])
             if ref is not None:
-                close_pos(i, ref, "stop")
+                close_pos(i, ref, "trail_stop" if pos[4] > pos[5] else "stop")
+        if pos is not None and trail:
+            # 트레일링 스탑: 봉이 끝난 뒤 최고가를 반영 (봉 안의 순서를 모르므로 다음 봉부터 적용)
+            pos[6] = max(pos[6], h[i])
+            pos[4] = max(pos[4], pos[6] * (1 - trail))
 
         a = action[i]
         if a == BUY:

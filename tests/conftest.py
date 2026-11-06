@@ -83,6 +83,12 @@ class Scripted(Strategy):
     def min_bars(self):
         return 1
 
+    def compute(self, candles):
+        idx = ((candles["ts"] - T0) // BAR).astype(int)
+        action = [self.script.get(int(i), HOLD) for i in idx]
+        return pd.DataFrame({"action": action, "stop_loss": candles["close"] * (1 - self.stop_pct),
+                             "strength": 0.0}, index=candles.index)
+
     def generate(self, candles):
         i = int((candles["ts"].iloc[-1] - T0) // BAR)
         price = float(candles["close"].iloc[-1])

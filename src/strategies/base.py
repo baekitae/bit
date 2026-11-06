@@ -75,6 +75,12 @@ class Strategy:
     def min_bars(self) -> int:
         raise NotImplementedError
 
+    @property
+    def trail_pct(self) -> float | None:
+        """트레일링 스탑 비율 (진입 후 최고가 대비 하락률). 없으면 None."""
+        v = self.params.get("trail_pct")
+        return float(v) if v else None
+
     def compute(self, candles: pd.DataFrame) -> pd.DataFrame:
         """columns: action(buy/sell/hold), stop_loss, strength, 그리고 지표 열들."""
         raise NotImplementedError

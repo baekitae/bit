@@ -2,9 +2,10 @@ from src.strategies.base import Strategy
 from src.strategies.donchian import DonchianBreakout
 from src.strategies.ma_cross import MACross
 from src.strategies.mean_reversion import BollingerReversion, RSIReversion
+from src.strategies.titan import TitanRest
 
 REGISTRY: dict[str, type[Strategy]] = {
-    cls.name: cls for cls in (MACross, DonchianBreakout, RSIReversion, BollingerReversion)
+    cls.name: cls for cls in (MACross, DonchianBreakout, RSIReversion, BollingerReversion, TitanRest)
 }
 
 

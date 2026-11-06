@@ -5,7 +5,7 @@
 봉 i 가 마감되었을 때 처리 순서:
   1. 하루 경계(KST 09:00)가 바뀌었으면 당일 시작 자산을 갱신
   2. 직전 봉에서 만든 대기 주문을 봉 i 의 시가에 체결   (= "다음 봉 시가 체결")
-  3. 보유 포지션의 손절 확인 (봉 i 의 저가 기준, 진입한 봉 포함)
+  3. 보유 포지션의 손절 확인 (봉 i 의 저가 기준, 진입한 봉 포함), 트레일링 손절가 갱신
   4. 봉 i 까지의 데이터로 신호 계산 → 진입은 리스크 관문 심사 후 대기 주문, 청산은 바로 대기 주문
   5. 봉 i 종가로 자산 평가·기록
   6. 상태 저장 후 커밋 (봉 단위로 원자적 저장)
@@ -99,7 +99,8 @@ class Track:
                     if not data_ok:
                         acc.cancel_order(o["id"], f"체결 봉 데이터 이상: {data_reason}")
                         continue
-                    acc.fill_buy(o["id"], ts, bar_d["open"], o["target_notional"], o["stop_loss"])
+                    acc.fill_buy(o["id"], ts, bar_d["open"], o["target_notional"], o["stop_loss"],
+                                 self.strategy.trail_pct)
                 else:
                     if acc.position() is None:
                         acc.cancel_order(o["id"], "청산할 포지션 없음")
@@ -112,9 +113,12 @@ class Track:
             if pos is not None:
                 ref = stop_trigger_price(bar_d["open"], bar_d["low"], pos.stop_loss)
                 if ref is not None:
-                    oid = acc.place_order("sell", "stop", ts, note=f"손절가 {pos.stop_loss:.0f}")
-                    _, pnl = acc.close_position(oid, ts, ref, "stop")
+                    kind = "trail_stop" if pos.stop_loss > pos.initial_stop else "stop"
+                    oid = acc.place_order("sell", kind, ts, note=f"손절가 {pos.stop_loss:.0f}")
+                    _, pnl = acc.close_position(oid, ts, ref, kind)
                     self._after_trade(pnl, close_ts)
+            # 트레일링 스탑: 이 봉의 최고가를 반영해 다음 봉부터 적용
+            acc.update_trailing(bar_d["high"])
 
             # 4. 신호
             sig = self.strategy.generate(window)

@@ -41,6 +41,10 @@ regime:                       # 국면 분류 (DESIGN.md 6-3). 백테스트 전�
   slope_threshold: 0.02       # 기울기 임계값 (±2%)
 
 backtest:                     # 2단계 (DESIGN.md 6-3, 6-4)
+  strategies: [ma_cross, donchian, rsi_reversion, bollinger_reversion]   # 기본 비교 대상
+  fixed_params:               # --fixed 로 검증할 사용자 설계 규칙 (탐색 없이 그대로)
+    titan_rest: {ma_short: 5, ma_mid: 20, ma_long: 60, rise_bars: 5, rs_period: 60,
+                 band_low: -0.02, band_high: 0.03, atr_period: 14, atr_stop_mult: 3.0, trail_pct: 0.12}
   train_ratio: 0.7            # 앞 70% 학습, 뒤 30% 검증
   walk_forward:
     train_months: 18
