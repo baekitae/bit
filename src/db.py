@@ -252,3 +252,20 @@ def log_event(conn: sqlite3.Connection, run_id: str, event: str, detail: str | N
     conn.execute(
         "INSERT INTO run_log (run_id, event, detail) VALUES (?, ?, ?)", (run_id, event, detail)
     )
+
+
+def backup_db(conn: sqlite3.Connection, out_dir: str | Path, keep: int = 7, tag: str | None = None) -> Path:
+    """실행 중에도 안전한 백업 (SQLite 백업 API). 가장 최근 keep 개만 남긴다."""
+    from datetime import datetime
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"bot-{tag or datetime.now().strftime('%Y%m%d-%H%M')}.db"
+    dst = sqlite3.connect(str(path))
+    try:
+        conn.backup(dst)
+    finally:
+        dst.close()
+    olds = sorted(out.glob("bot-*.db"))
+    for p in olds[:-keep] if keep > 0 else []:
+        p.unlink()
+    return path

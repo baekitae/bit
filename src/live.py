@@ -53,7 +53,7 @@ def update_signal_outcomes(conn: sqlite3.Connection, run_id: str) -> int:
 class LiveRunner:
     def __init__(self, conn: sqlite3.Connection, cfg: dict[str, Any], client: UpbitClient,
                  council: Any = None, run_id: str = "live", now: Callable[[], float] = time.time,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print, notifier: Any = None):
         self.conn = conn
         self.cfg = cfg
         self.client = client
@@ -68,6 +68,7 @@ class LiveRunner:
         self.boundary = int(cfg.get("day_boundary_utc_hour", 0)) * 3600
         self.max_delay_bars = float(cfg["data"]["max_candle_delay_bars"])
         self.council = council
+        self.notifier = notifier
         self.tracks: list[Track] = build_tracks(conn, cfg, run_id, council=council)
         self.evolutions = self._make_evolutions()
         units = {t.unit for t in self.tracks}
@@ -168,14 +169,53 @@ class LiveRunner:
         delay = float(self.cfg.get("live", {}).get("delay_after_close_sec", 15))
         return (now // bar + 1) * bar + delay
 
+    def safe_step(self) -> None:
+        """한 회차 실행. 예상 못한 오류가 나도 기록·알림만 하고 다음 봉에 다시 시도한다."""
+        try:
+            self._report(self.step())
+        except Exception as e:
+            import traceback
+            self.conn.rollback()
+            msg = f"회차 처리 오류: {type(e).__name__}: {e}"
+            self.log(msg)
+            self.log(traceback.format_exc())
+            log_event(self.conn, self.run_id, "step_error", msg)
+            self.conn.commit()
+        self._daily_backup()
+        if self.notifier is not None:
+            try:
+                self.notifier.after_step(int(self.now()))
+            except Exception as e:
+                self.log(f"알림 처리 오류: {e}")
+
+    def _daily_backup(self) -> None:
+        """하루에 한 번 DB 백업 (data/backups, 최근 7개)."""
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        from src.config import ROOT
+        from src.db import backup_db
+        day = datetime.fromtimestamp(int(self.now()) - self.boundary, tz=timezone.utc).strftime("%Y%m%d")
+        if getattr(self, "_backup_day", None) == day:
+            return
+        self._backup_day = day
+        try:
+            backup_db(self.conn, Path(self.cfg.get("live", {}).get("backup_dir") or ROOT / "data" / "backups"),
+                      keep=int(self.cfg.get("live", {}).get("backup_keep", 7)), tag=day)
+        except Exception as e:
+            self.log(f"백업 실패: {e}")
+
     def run_forever(self) -> None:
+        names = ", ".join(t.name for t in self.tracks)
         self.log(f"실시간 모의매매 시작 (run_id={self.run_id}, 트랙 {len(self.tracks)}개). Ctrl+C 로 종료")
-        self._report(self.step())
+        if self.notifier is not None:
+            self.notifier.sender.send(f"▶️ 실시간 모의매매 시작 (트랙 {len(self.tracks)}개: {names})")
+        self.safe_step()
         target = self.next_run_at(self.now())
         while True:
             now = self.now()
             if now >= target:
-                self._report(self.step())
+                self.safe_step()
                 target = self.next_run_at(self.now())
             else:
                 time.sleep(min(30.0, max(1.0, target - now)))   # 절전 복귀·시계 변경에도 30초 안에 다시 확인

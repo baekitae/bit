@@ -32,6 +32,8 @@ python run.py fetch      :: 업비트 4시간봉 4년치 수집 (다시 실행�
 python run.py council-test   :: AI 위원회 1회 시험 (실제 API 호출, 매매 없음, 비용 수백 원)
 python run.py council-test --track G1   :: Gemini 위원회 1회 시험
 python run.py evolution      :: C 트랙 버전 이력 (되돌리기: --rollback v1)
+python run.py notify-test    :: 텔레그램 알림 시험 (.env 에 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+python run.py backup         :: DB 백업 (data/backups)
 python run.py live           :: 실시간 모의매매 시작 (켜 두기). Ctrl+C 로 종료, 다시 켜면 이어서 진행
 streamlit run src/report/dashboard.py   :: 대시보드 (브라우저에서 http://localhost:8501)
 python run.py backtest   :: 2단계: 후보 전략 4개 비교 → reports/stage2_240m.md
@@ -41,6 +43,10 @@ python run.py runs       :: 실행 목록
 python run.py summary --run-id replay-YYYYMMDD-HHMMSS
 python -m pytest         :: 테스트
 ```
+
+### 서버(오라클 등)에서 24시간 운영
+
+[deploy/README.md](deploy/README.md) 를 보세요. 설치 스크립트, 자동 실행(systemd), 텔레그램 알림, 자동 백업이 들어 있습니다.
 
 ### 실시간 모의매매 운영 (Windows)
 

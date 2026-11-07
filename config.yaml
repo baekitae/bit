@@ -123,6 +123,12 @@ evolution:                    # C 트랙 진화 루프 (DESIGN.md 9장)
   max_shadow_days: 42         # 신호가 모자랄 때 최대 연장 기간
   min_shadow_signals: 4       # 섀도 기간 두 버전 진입 신호 합계 최소
 
+notify:                       # 텔레그램 알림 (키는 .env). 보낼 항목
+  trades: true                # 진입·청산 체결
+  meetings: true              # 위원회 결정 (B·G·C)
+  errors: true                # 데이터·처리 오류, C 트랙 진화 단계
+  daily_summary: true         # 매일 KST 09시 트랙별 자산 요약
+
 live:                         # 실시간 루프 (DESIGN.md 12장)
   delay_after_close_sec: 15   # 봉 마감 후 이만큼 기다렸다가 처리
   max_late_sec: 900           # 마감 후 이보다 늦게 처리하게 된 봉은 매매하지 않음 (소급 매매 금지)

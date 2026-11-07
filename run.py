@@ -159,10 +159,15 @@ def cmd_live(cfg, conn, args) -> None:
         print("주의: ANTHROPIC_API_KEY 가 없습니다 (.env 확인). B·C 트랙 위원회는 오류로 처리되어 모두 skip 됩니다.")
     if any(d.get("council") == "gemini" for d in defs) and not os.environ.get("GEMINI_API_KEY"):
         print("주의: GEMINI_API_KEY 가 없습니다 (.env 확인). G 트랙(Gemini 비교) 위원회는 모두 skip 됩니다.")
+    from src.notify import Notifier, Telegram
+
     client = UpbitClient(interval_sec=float(cfg["data"]["request_interval_sec"]))
-    runner = LiveRunner(conn, cfg, client, council=make_council(cfg) if needs_ai else None, run_id=args.run_id)
+    tg = Telegram.from_env()
+    print("텔레그램 알림: " + ("켜짐" if tg else "꺼짐 (.env 에 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 를 넣으면 켜짐)"))
+    runner = LiveRunner(conn, cfg, client, council=make_council(cfg) if needs_ai else None, run_id=args.run_id,
+                        notifier=Notifier(conn, args.run_id, cfg, tg) if tg else None)
     if args.once:
-        runner._report(runner.step())
+        runner.safe_step()
         return
     try:
         runner.run_forever()
@@ -244,6 +249,23 @@ def cmd_evolution(cfg, conn, args) -> None:
         print(f"       {json.loads(r['params'])}")
 
 
+def cmd_notify_test(cfg, conn, args) -> None:
+    """텔레그램 알림 시험 메시지 보내기."""
+    from src.notify import Telegram
+    tg = Telegram.from_env()
+    if tg is None:
+        print(".env 에 TELEGRAM_BOT_TOKEN 과 TELEGRAM_CHAT_ID 를 넣어 주세요.")
+        return
+    print("보냄" if tg.send("✅ BTC 위원회 봇 알림 시험") else "실패: 토큰·채팅 ID 를 확인하세요")
+
+
+def cmd_backup(cfg, conn, args) -> None:
+    """DB 백업 (실행 중에도 안전)."""
+    from src.config import ROOT
+    from src.db import backup_db
+    print(f"백업: {backup_db(conn, ROOT / 'data' / 'backups', keep=0)}")
+
+
 def cmd_summary(cfg, conn, args) -> None:
     rows = conn.execute("SELECT track FROM tracks WHERE run_id=?", (args.run_id,)).fetchall()
     if not rows:
@@ -285,6 +307,8 @@ def main(argv=None) -> int:
     lp.add_argument("--once", action="store_true", help="한 회차만 실행하고 종료")
     cp = sub.add_parser("council-test", help="실제 AI 로 위원회 1회 시험 (매매 없음)")
     cp.add_argument("--track", default="B1", help="B1 (Claude) 또는 G1 (Gemini) 등")
+    sub.add_parser("notify-test", help="텔레그램 알림 시험")
+    sub.add_parser("backup", help="DB 백업 (data/backups)")
     ep = sub.add_parser("evolution", help="C 트랙 버전 이력 / 되돌리기")
     ep.add_argument("--track", default="C")
     ep.add_argument("--run-id", default="live")
@@ -300,7 +324,8 @@ def main(argv=None) -> int:
     conn = connect(db_path(cfg))
     try:
         {"fetch": cmd_fetch, "backtest": cmd_backtest, "infinite": cmd_infinite, "live": cmd_live,
-         "council-test": cmd_council_test, "evolution": cmd_evolution, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
+         "council-test": cmd_council_test, "evolution": cmd_evolution,
+         "notify-test": cmd_notify_test, "backup": cmd_backup, "replay": cmd_replay, "summary": cmd_summary, "runs": cmd_runs}[args.cmd](cfg, conn, args)
     finally:
         conn.close()
     return 0
