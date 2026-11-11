@@ -256,7 +256,7 @@ def cmd_notify_test(cfg, conn, args) -> None:
     if tg is None:
         print(".env 에 TELEGRAM_BOT_TOKEN 과 TELEGRAM_CHAT_ID 를 넣어 주세요.")
         return
-    print("보냄" if tg.send("✅ BTC 위원회 봇 알림 시험") else "실패: 토큰·채팅 ID 를 확인하세요")
+    print("보냄" if tg.send("✅ BTC 위원회 봇 알림 시험") else "실패 (위 메시지의 원인을 확인하세요)")
 
 
 def cmd_backup(cfg, conn, args) -> None:

@@ -31,17 +31,29 @@ class Telegram:
         token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
         return cls(token, chat, **kw) if token and chat else None
 
-    def send(self, text: str) -> bool:
-        try:
-            r = self.session.post(self.URL.format(token=self.token),
-                                  json={"chat_id": self.chat_id, "text": text[:4000]}, timeout=10)
-            if r.status_code >= 400:
-                self.log(f"텔레그램 전송 실패 {r.status_code}")
-                return False
-            return True
-        except Exception as e:  # 네트워크 오류 등
-            self.log(f"텔레그램 전송 실패: {type(e).__name__}")
-            return False
+    def send(self, text: str, retries: int = 3, timeout: float = 30.0) -> bool:
+        """전송. 네트워크 지연·일시 오류는 몇 번 다시 시도한다. 성공하면 True."""
+        import time
+        last = ""
+        for attempt in range(retries):
+            try:
+                r = self.session.post(self.URL.format(token=self.token),
+                                      json={"chat_id": self.chat_id, "text": text[:4000]}, timeout=timeout)
+            except Exception as e:  # 시간 초과, 연결 오류 등
+                last = f"네트워크 오류 {type(e).__name__} (서버에서 api.telegram.org 연결 확인 필요)"
+            else:
+                if r.status_code < 400:
+                    return True
+                if r.status_code in (400, 401, 403, 404):
+                    hint = {401: "토큰이 틀림", 404: "토큰이 틀림", 400: "채팅 ID 가 틀리거나 봇과 대화를 시작하지 않음",
+                            403: "봇이 차단됨 (텔레그램에서 봇 대화창의 시작을 누르세요)"}[r.status_code]
+                    self.log(f"텔레그램 전송 실패 {r.status_code}: {hint}")
+                    return False          # 설정 문제는 다시 시도해도 안 됨
+                last = f"텔레그램 서버 오류 {r.status_code}"
+            if attempt < retries - 1:
+                time.sleep(2 * (attempt + 1))
+        self.log(f"텔레그램 전송 실패: {last}")
+        return False
 
 
 def _kst(ts: int) -> str:

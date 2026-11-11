@@ -54,11 +54,36 @@ def test_daily_summary_once_per_day(conn, cfg):
     assert s and "하루 요약" in s and "A1" in s and "누적 AI 비용" in s
 
 
-def test_send_failures_are_swallowed():
+def test_send_failures_are_swallowed(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "sleep", lambda s: None)
     logs = []
     assert Telegram("T", "1", session=Sess(fail=True), log=logs.append).send("x") is False
-    assert Telegram("T", "1", session=Sess(status=401), log=logs.append).send("x") is False
-    assert len(logs) == 2
+    assert "네트워크 오류" in logs[-1]
+    s401 = Sess(status=401)
+    assert Telegram("T", "1", session=s401, log=logs.append).send("x") is False
+    assert "토큰" in logs[-1] and len(s401.sent) == 1          # 설정 오류는 재시도하지 않음
+    s500 = Sess(status=500)
+    assert Telegram("T", "1", session=s500, log=logs.append).send("x") is False
+    assert len(s500.sent) == 3                                   # 서버 오류는 3번 시도
+
+
+def test_send_retries_then_succeeds(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    class Flaky(Sess):
+        def __init__(self):
+            super().__init__()
+            self.n = 0
+
+        def post(self, url, json, timeout):
+            self.n += 1
+            if self.n < 3:
+                raise TimeoutError("read timeout")
+            return super().post(url, json, timeout)
+    f = Flaky()
+    assert Telegram("T", "1", session=f, log=lambda s: None).send("x") is True and f.n == 3
 
 
 def test_from_env(monkeypatch):
