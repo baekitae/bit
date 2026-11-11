@@ -1,0 +1,13 @@
+# 대시보드 모양 (streamlit run 을 프로젝트 폴더에서 실행할 때 적용)
+[theme]
+primaryColor = "#2a78d6"
+base = "light"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f3f3f0"
+textColor = "#1f1f1c"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
