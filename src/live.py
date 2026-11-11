@@ -53,7 +53,7 @@ def update_signal_outcomes(conn: sqlite3.Connection, run_id: str) -> int:
 class LiveRunner:
     def __init__(self, conn: sqlite3.Connection, cfg: dict[str, Any], client: UpbitClient,
                  council: Any = None, run_id: str = "live", now: Callable[[], float] = time.time,
-                 log: Callable[[str], None] = print, notifier: Any = None):
+                 log: Callable[[str], None] = print, notifier: Any = None, commands: Any = None):
         self.conn = conn
         self.cfg = cfg
         self.client = client
@@ -69,6 +69,7 @@ class LiveRunner:
         self.max_delay_bars = float(cfg["data"]["max_candle_delay_bars"])
         self.council = council
         self.notifier = notifier
+        self.commands = commands
         self.tracks: list[Track] = build_tracks(conn, cfg, run_id, council=council)
         self.evolutions = self._make_evolutions()
         units = {t.unit for t in self.tracks}
@@ -153,7 +154,7 @@ class LiveRunner:
             if missed_idx:
                 note = "첫 시작" if last is None else ("데이터 지연·프로그램 중단")
                 t.catch_up(frame.iloc[missed_idx], float(frame["close"].iloc[-1]), note)
-                summary["caught_up"].append((t.name, len(missed_idx)))
+                summary["caught_up"].append((t.name, len(missed_idx), note))
             if fresh:
                 w = frame.iloc[max(0, newest - self.window + 1): newest + 1]
                 t.on_bar(w, int(ts[newest - 1]), now_ts=now, max_delay_bars=self.max_delay_bars)
@@ -210,6 +211,8 @@ class LiveRunner:
         self.log(f"실시간 모의매매 시작 (run_id={self.run_id}, 트랙 {len(self.tracks)}개). Ctrl+C 로 종료")
         if self.notifier is not None:
             self.notifier.sender.send(f"▶️ 실시간 모의매매 시작 (트랙 {len(self.tracks)}개: {names})")
+        if self.commands is not None:
+            self.commands.skip_backlog()
         self.safe_step()
         target = self.next_run_at(self.now())
         while True:
@@ -218,14 +221,32 @@ class LiveRunner:
                 self.safe_step()
                 target = self.next_run_at(self.now())
             else:
-                time.sleep(min(30.0, max(1.0, target - now)))   # 절전 복귀·시계 변경에도 30초 안에 다시 확인
+                self._wait(min(25.0, max(1.0, target - now)))   # 절전 복귀·시계 변경에도 25초 안에 다시 확인
+
+    def _wait(self, seconds: float) -> None:
+        """다음 봉까지 기다리는 동안 텔레그램 명령에 답한다 (명령 기능이 꺼져 있으면 그냥 쉰다)."""
+        if self.commands is None:
+            time.sleep(seconds)
+            return
+        t0 = time.monotonic()
+        handled = 0
+        try:
+            handled = self.commands.poll(int(seconds))
+        except Exception as e:
+            self.log(f"텔레그램 명령 처리 오류: {e}")
+        left = seconds - (time.monotonic() - t0)
+        if handled == 0 and left > 0.5:
+            time.sleep(left)        # 폴링이 바로 실패한 경우 (네트워크 오류 등) 빈 회전 방지
 
     def _report(self, s: dict[str, Any]) -> None:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         if s["error"]:
             self.log(f"[{stamp}] {s['error']}")
-        for name, n in s["caught_up"]:
-            self.log(f"[{stamp}] {name}: 놓친 봉 {n}개 (소급 매매 없음)")
+        for name, n, note in s["caught_up"]:
+            if note == "첫 시작":
+                self.log(f"[{stamp}] {name}: 첫 시작 → 기준점 기록 (다음 봉 마감부터 처리)")
+            else:
+                self.log(f"[{stamp}] {name}: 놓친 봉 {n}개 (소급 매매 없음, {note})")
         for name, bar in s["processed"]:
             self.log(f"[{stamp}] {name}: {bar} 봉 처리")
         for n in s.get("notes", []):

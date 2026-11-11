@@ -124,3 +124,53 @@ def test_backup_keeps_latest(conn, tmp_path):
     assert files == ["bot-20260102.db", "bot-20260103.db", "bot-20260104.db"]
     import sqlite3
     assert sqlite3.connect(tmp_path / files[-1]).execute("SELECT event FROM run_log").fetchone()[0] == "hello"
+
+
+class UpdSess(Sess):
+    """getUpdates 를 흉내 낸다."""
+
+    def __init__(self, updates):
+        super().__init__()
+        self.updates = updates
+
+    def get(self, url, params, timeout):
+        off = params.get("offset")
+        ups = [u for u in self.updates if off is None or off == -1 and u is self.updates[-1]
+               or (off not in (None, -1) and u["update_id"] >= off)]
+
+        class R:
+            status_code = 200
+
+            def json(_):
+                return {"ok": True, "result": ups}
+        return R()
+
+
+def upd(i, text, chat="123"):
+    return {"update_id": i, "message": {"chat": {"id": int(chat)}, "text": text}}
+
+
+def test_commands_reply_only_to_owner(conn, cfg):
+    from src.notify import Commands
+    cfg = make_cfg(cfg)
+    run_pair(conn, cfg, FakeLLM())
+    conn.execute("INSERT INTO run_log (run_id, created_at, event) VALUES ('t', '2026-01-01 00:00:00', 'comparison_start')")
+    sess = UpdSess([upd(1, "/status"), upd(2, "/cost"), upd(3, "/status", chat="999"), upd(4, "/today@KITAE_bot")])
+    c = Commands(conn, "t", cfg, Telegram("T", "123", session=sess, log=lambda s: None), now=lambda: T0 + 300 * BAR)
+    assert c.poll(0) == 3                                     # 남의 채팅(999)은 무시
+    texts = [b["text"] for _, b in sess.sent]
+    assert "A1" in texts[0] and "B1" in texts[0] and "비교" in texts[0]
+    assert "Claude" in texts[1] and "합계" in texts[1]
+    assert "오늘" in texts[2]
+    assert c.offset == 5
+    assert c.poll(0) == 0                                     # 이미 처리한 명령은 다시 처리 안 함
+
+
+def test_unknown_command_shows_help_and_backlog_skipped(conn, cfg):
+    from src.notify import Commands
+    sess = UpdSess([upd(10, "/status"), upd(11, "hello")])
+    c = Commands(conn, "t", make_cfg(cfg), Telegram("T", "123", session=sess, log=lambda s: None))
+    c.skip_backlog()
+    assert c.offset == 12 and c.poll(0) == 0                  # 시작 전 쌓인 명령은 무시
+    assert "명령 목록" in c.handle("blah")
+    assert c.handle("/status") == "아직 기록이 없습니다."

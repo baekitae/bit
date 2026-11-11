@@ -56,6 +56,22 @@ class Telegram:
         return False
 
 
+    def get_updates(self, offset: int | None, timeout: int) -> list[dict[str, Any]]:
+        """새 메시지 받기 (롱 폴링: 메시지가 없으면 timeout 초까지 기다림). 실패하면 빈 목록."""
+        params: dict[str, Any] = {"timeout": timeout, "allowed_updates": json.dumps(["message"])}
+        if offset is not None:
+            params["offset"] = offset
+        try:
+            r = self.session.get(self.URL.replace("sendMessage", "getUpdates").format(token=self.token),
+                                 params=params, timeout=timeout + 15)
+            if r.status_code >= 400:
+                return []
+            data = r.json()
+            return data.get("result", []) if data.get("ok") else []
+        except Exception:
+            return []
+
+
 def _kst(ts: int) -> str:
     return datetime.fromtimestamp(int(ts), tz=KST).strftime("%m-%d %H:%M")
 
@@ -143,3 +159,124 @@ class Notifier:
             msgs.append(s)
         for m in msgs:
             self.sender.send(m)
+
+
+class Commands:
+    """텔레그램 명령에 답한다. 설정된 채팅 ID 에서 온 메시지에만 답하고, 읽기만 한다 (매매에 영향 없음)."""
+
+    HELP = ("명령 목록\n"
+            "/status  트랙별 자산·수익률, 보유 포지션\n"
+            "/today   오늘(KST 09시 이후) 체결과 위원회 결정\n"
+            "/cost    AI 비용 합계\n"
+            "/help    이 목록")
+
+    def __init__(self, conn: sqlite3.Connection, run_id: str, cfg: dict[str, Any], sender: Telegram,
+                 now: Callable[[], float] | None = None):
+        import time
+        self.conn, self.run_id, self.cfg, self.sender = conn, run_id, cfg, sender
+        self.now = now or time.time
+        self.offset: int | None = None
+        self.boundary = int(cfg.get("day_boundary_utc_hour", 0)) * 3600
+
+    def skip_backlog(self) -> None:
+        """시작 전에 쌓인 명령은 무시한다."""
+        ups = self.sender.get_updates(-1, 0)
+        if ups:
+            self.offset = ups[-1]["update_id"] + 1
+
+    def poll(self, timeout: int) -> int:
+        """명령을 기다렸다가 처리한다. 처리한 명령 수."""
+        n = 0
+        for u in self.sender.get_updates(self.offset, timeout):
+            self.offset = u["update_id"] + 1
+            msg = u.get("message") or {}
+            if str(msg.get("chat", {}).get("id")) != str(self.sender.chat_id):
+                continue                      # 다른 사람의 메시지는 무시
+            reply = self.handle((msg.get("text") or "").strip())
+            if reply:
+                self.sender.send(reply, retries=2)
+                n += 1
+        return n
+
+    def handle(self, text: str) -> str | None:
+        cmd = text.split()[0].split("@")[0].lower() if text else ""
+        try:
+            return {"/status": self.status, "/today": self.today, "/cost": self.cost,
+                    "/help": lambda: self.HELP, "/start": lambda: self.HELP}.get(cmd, lambda: self.HELP)()
+        except Exception as e:
+            return f"명령 처리 중 오류: {type(e).__name__}"
+
+    def _day_start(self) -> int:
+        now = int(self.now())
+        return (now - self.boundary) // 86400 * 86400 + self.boundary
+
+    def status(self) -> str:
+        rows = self.conn.execute(
+            "SELECT track, last_equity, cash, initial_cash, last_bar_ts FROM tracks WHERE run_id=? ORDER BY track",
+            (self.run_id,)).fetchall()
+        if not rows:
+            return "아직 기록이 없습니다."
+        start = self.conn.execute("SELECT MIN(created_at) FROM run_log WHERE run_id=? AND event='comparison_start'",
+                                  (self.run_id,)).fetchone()[0]
+        days = ""
+        if start:
+            d0 = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+            days = f" · 비교 {(datetime.fromtimestamp(self.now(), tz=timezone.utc) - d0).days + 1}일째"
+        last = max((r["last_bar_ts"] or 0) for r in rows)
+        out = [f"📈 상태 (마지막 봉 {_kst(last)} KST{days})"]
+        for r in rows:
+            eq = r["last_equity"] or r["cash"]
+            out.append(f"{r['track']:<6}{eq:>12,.0f}원 {eq / r['initial_cash'] - 1:+.2%}")
+        pos = self.conn.execute("SELECT track, entry_price, stop_loss FROM positions WHERE run_id=? ORDER BY track",
+                                (self.run_id,)).fetchall()
+        if pos:
+            out.append("보유 중:")
+            out += [f"  {p['track']} 진입 {p['entry_price']:,.0f} · 손절 {p['stop_loss']:,.0f}" for p in pos]
+        else:
+            out.append("보유 중인 포지션 없음")
+        return "\n".join(out)
+
+    def today(self) -> str:
+        since = self._day_start()
+        out = [f"🗓 오늘 ({_kst(since)} KST 이후)"]
+        trades = self.conn.execute(
+            """SELECT o.track, o.side, o.kind, o.fill_price, t.pnl_pct FROM paper_orders o
+               LEFT JOIN trades t ON t.exit_order_id = o.id
+               WHERE o.run_id=? AND o.status='filled' AND o.fill_bar_ts >= ? ORDER BY o.id""",
+            (self.run_id, since - 4 * 3600)).fetchall()
+        for t in trades:
+            if t["side"] == "buy":
+                out.append(f"🟢 {t['track']} 진입 {t['fill_price']:,.0f}")
+            else:
+                pnl = f" {t['pnl_pct']:+.2%}" if t["pnl_pct"] is not None else ""
+                out.append(f"🔴 {t['track']} {KIND_LABELS.get(t['kind'], t['kind'])} {t['fill_price']:,.0f}{pnl}")
+        start_txt = datetime.fromtimestamp(since, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        meets = self.conn.execute(
+            "SELECT track, decision, error, cost_krw FROM council_meetings WHERE run_id=? AND created_at >= ? ORDER BY id",
+            (self.run_id, start_txt)).fetchall()
+        for m in meets:
+            if m["error"]:
+                out.append(f"🤖 {m['track']} 실패→건너뜀")
+            else:
+                a = json.loads(m["decision"] or "{}").get("applied", {})
+                out.append(f"🤖 {m['track']} {DECISION_LABELS.get(a.get('decision'), a.get('decision'))}"
+                           f" (x{a.get('size_multiplier', 0):.2f}, {m['cost_krw'] or 0:,.0f}원)")
+        if len(out) == 1:
+            out.append("오늘은 아직 체결도 회의도 없습니다.")
+        return "\n".join(out)
+
+    def cost(self) -> str:
+        rows = self.conn.execute(
+            """SELECT COALESCE(council, 'default') AS c, COUNT(*) AS n, COALESCE(SUM(cost_krw), 0) AS krw,
+                      SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS err
+               FROM council_meetings WHERE run_id=? GROUP BY 1""", (self.run_id,)).fetchall()
+        if not rows:
+            return "아직 위원회 회의가 없습니다."
+        names = {"default": "Claude", "gemini": "Gemini"}
+        out = ["💰 AI 비용 (누적)"]
+        total = 0.0
+        for r in rows:
+            total += r["krw"]
+            out.append(f"{names.get(r['c'], r['c'])}: 회의 {r['n']}회 (실패 {r['err']}) · {r['krw']:,.0f}원")
+        out.append(f"합계 {total:,.0f}원")
+        return "\n".join(out)

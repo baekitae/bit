@@ -88,7 +88,7 @@ def test_restart_gap_no_retroactive_trading(conn, setup):
     runner.step()
     set_now(T0 + 650 * BAR + 20)             # 49개 봉 동안 꺼져 있었음
     s = runner.step()
-    assert ("A1", 48) in s["caught_up"]
+    assert any(c[0] == "A1" and c[1] == 48 for c in s["caught_up"])
     assert ("A1",) == tuple(n for n, _ in s["processed"] if n == "A1")
     # 놓친 구간에서 생긴 주문·거래 없음
     n = conn.execute("""SELECT COUNT(*) FROM paper_orders WHERE run_id='live' AND track='A1'

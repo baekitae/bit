@@ -159,13 +159,15 @@ def cmd_live(cfg, conn, args) -> None:
         print("주의: ANTHROPIC_API_KEY 가 없습니다 (.env 확인). B·C 트랙 위원회는 오류로 처리되어 모두 skip 됩니다.")
     if any(d.get("council") == "gemini" for d in defs) and not os.environ.get("GEMINI_API_KEY"):
         print("주의: GEMINI_API_KEY 가 없습니다 (.env 확인). G 트랙(Gemini 비교) 위원회는 모두 skip 됩니다.")
-    from src.notify import Notifier, Telegram
+    from src.notify import Commands, Notifier, Telegram
 
     client = UpbitClient(interval_sec=float(cfg["data"]["request_interval_sec"]))
     tg = Telegram.from_env()
     print("텔레그램 알림: " + ("켜짐" if tg else "꺼짐 (.env 에 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 를 넣으면 켜짐)"))
     runner = LiveRunner(conn, cfg, client, council=make_council(cfg) if needs_ai else None, run_id=args.run_id,
-                        notifier=Notifier(conn, args.run_id, cfg, tg) if tg else None)
+                        notifier=Notifier(conn, args.run_id, cfg, tg) if tg else None,
+                        commands=Commands(conn, args.run_id, cfg, tg)
+                        if tg and cfg.get("notify", {}).get("commands", True) else None)
     if args.once:
         runner.safe_step()
         return
