@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / ".env", override=True)   # .env 파일 값을 항상 우선 (셸에 남은 예전 값 무시)
     p = Path(path) if path else ROOT / "config.yaml"
     with open(p, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
